@@ -1,0 +1,12 @@
+.env
+.env.*
+.git
+.DS_Store
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+.venv/
+staticfiles
+media

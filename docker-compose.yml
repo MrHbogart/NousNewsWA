@@ -1,0 +1,83 @@
+services:
+  db:
+    container_name: nousnews-postgresdb
+    image: postgres:15-alpine
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - nousnews_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER:-postgres}\" -d \"$${POSTGRES_DB:-postgres}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+
+  backend:
+    container_name: nousnews-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./backend/.env
+    environment:
+      DJANGO_DB_HOST: db
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8081:8000"
+    volumes:
+      - backend_static:/app/staticfiles
+      - backend_media:/app/media
+    networks:
+      - nousnews_network
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "python -c \"import urllib.request,sys; urllib.request.urlopen('http://127.0.0.1:8000/api/health/'); sys.exit(0)\"",
+        ]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  frontend:
+    container_name: nousnews-frontend
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./frontend/.env
+    environment:
+      NUXT_INTERNAL_API_BASE_URL: http://backend:8000/api
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    networks:
+      - nousnews_network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:3001/ || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+networks:
+  nousnews_network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  backend_static:
+  backend_media:
