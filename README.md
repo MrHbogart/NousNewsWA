@@ -1,6 +1,6 @@
 # NousNews
 
-NousNews is a full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a crawler pipeline that builds hourly briefs from curated sources.
+Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a crawler pipeline that builds hourly briefs from curated sources.
 
 ## Features
 
@@ -10,7 +10,7 @@ NousNews is a full-stack news platform with a Nuxt 3 frontend, a Django REST API
 - Hourly briefs and headline summaries
 - Docker-first deployment with health checks
 
-## Project Structure
+## Project structure
 
 ```
 NousNews/
@@ -20,7 +20,7 @@ NousNews/
 └── passgen.py             # Helper for generating secrets
 ```
 
-## Quick Start (Docker)
+## Quick start (Docker)
 
 1) Configure backend and frontend env files:
 
@@ -47,7 +47,7 @@ DJANGO_SUPERUSER_EMAIL=admin@example.com
 DJANGO_SUPERUSER_PASSWORD=change-me
 ```
 
-## Local Development
+## Local development
 
 ### Backend
 
@@ -57,11 +57,6 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp ../.env.example .env
-```
-
-Update `backend/.env` for local use, then run:
-
-```bash
 python manage.py migrate
 python manage.py runserver
 ```
@@ -95,7 +90,7 @@ Then start the dev server:
 npm run dev
 ```
 
-## Environment Variables
+## Environment variables
 
 Backend (`backend/.env`):
 - `DJANGO_SECRET_KEY`
@@ -116,7 +111,7 @@ You can generate secure secrets with:
 python passgen.py
 ```
 
-## API Endpoints
+## API endpoints
 
 Base URL: `/api`
 
@@ -140,13 +135,13 @@ Crawler:
 - `GET /crawler/logs/?limit=50`
 - `GET /crawler/export.csv`
 
-## Crawler Utilities
+## Crawler utilities
 
 Backend management commands:
 - `python manage.py add_seeds`
 - `python manage.py crawl_loop`
 
-## Deployment Notes
+## Deployment notes
 
 - The Docker compose file exposes backend on port 8081 and frontend on 3001.
 - Use a proper secret for `DJANGO_SECRET_KEY` in production.
