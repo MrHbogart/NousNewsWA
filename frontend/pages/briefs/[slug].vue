@@ -96,7 +96,7 @@ useHead(() => {
   const description = brief.value?.summary
     ? brief.value.summary.slice(0, 160)
     : 'NousNews hourly market brief.'
-  const canonical = `${config.public.siteDomain.replace(/\\/$/, '')}/briefs/${slug}`
+  const canonical = `${config.public.siteDomain.replace(/\/$/, '')}/briefs/${slug}`
   return {
     title,
     meta: [

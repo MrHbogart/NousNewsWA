@@ -83,9 +83,10 @@ def build_brief_prompt(articles, hour_start, config: CrawlerConfig, previous_sum
     if len(articles_block) > config.brief_max_context_chars:
         articles_block = articles_block[: config.brief_max_context_chars] + "\n..."
 
-    base_prompt = config.brief_prompt_template.format(
-        articles=articles_block,
-        hour_start=hour_start.isoformat(),
+    base_prompt = (
+        config.brief_prompt_template
+        .replace("{articles}", articles_block)
+        .replace("{hour_start}", hour_start.isoformat())
     )
     if previous_summary:
         base_prompt += f"\n\nPrevious summary:\n{previous_summary.strip()}\n"

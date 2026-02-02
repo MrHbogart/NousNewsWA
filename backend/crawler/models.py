@@ -49,11 +49,11 @@ DEFAULT_BRIEF_PROMPT = (
     "Articles:\n"
     "{articles}\n\n"
     "Return ONLY valid JSON with this schema:\n"
-    "{\n"
+    "{{\n"
     '  "title": "Short headline for the hour",\n'
     '  "summary": "One concise paragraph (3-5 sentences)",\n'
     '  "references": ["https://source.url/1", "https://source.url/2"]\n'
-    "}\n\n"
+    "}}\n\n"
     "Rules:\n"
     "- Focus on facts present in the provided articles only.\n"
     "- Prefer clarity over hype; keep it professional.\n"

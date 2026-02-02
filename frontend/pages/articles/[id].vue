@@ -99,13 +99,13 @@ useHead(() => ({
     { property: 'og:type', content: 'article' },
     {
       property: 'og:url',
-      content: `${config.public.siteDomain.replace(/\\/$/, '')}/articles/${articleId}`,
+      content: `${config.public.siteDomain.replace(/\/$/, '')}/articles/${articleId}`,
     },
   ],
   link: [
     {
       rel: 'canonical',
-      href: `${config.public.siteDomain.replace(/\\/$/, '')}/articles/${articleId}`,
+      href: `${config.public.siteDomain.replace(/\/$/, '')}/articles/${articleId}`,
     },
   ],
 }))
