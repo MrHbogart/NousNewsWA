@@ -1,12 +1,12 @@
 # NousNews
 
-Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a crawler pipeline that builds hourly briefs from curated sources.
+Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a agent pipeline that builds hourly briefs from curated sources.
 
 ## Features
 
 - Nuxt 3 SSR frontend with Tailwind styling
 - Django REST Framework API
-- Postgres-backed crawler, seeds, logs, and exports
+- Postgres-backed agent, seeds, logs, and exports
 - Hourly briefs and headline summaries
 - Docker-first deployment with health checks
 
@@ -125,17 +125,17 @@ Articles and briefs:
 - `GET /briefs/headlines/?limit=12`
 - `GET /briefs/{slug}/`
 
-Crawler:
-- `GET /crawler/status/`
-- `POST /crawler/run/`
-- `GET /crawler/config/`
-- `PUT /crawler/config/`
-- `GET /crawler/seeds/`
-- `POST /crawler/seeds/`
-- `GET /crawler/logs/?limit=50`
-- `GET /crawler/export.csv`
+Agent:
+- `GET /agent/status/`
+- `POST /agent/run/`
+- `GET /agent/config/`
+- `PUT /agent/config/`
+- `GET /agent/seeds/`
+- `POST /agent/seeds/`
+- `GET /agent/logs/?limit=50`
+- `GET /agent/export.csv`
 
-## Crawler utilities
+## Agent utilities
 
 Backend management commands:
 - `python manage.py add_seeds`

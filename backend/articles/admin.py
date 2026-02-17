@@ -1,18 +1,19 @@
 from django.contrib import admin
 
-from .models import Article, HourlyBrief
+from .models import Card, CardArticle
 
 
-@admin.register(Article)
-class ArticleAdmin(admin.ModelAdmin):
-    list_display = ("source", "published_at", "title", "is_public")
-    list_filter = ("source", "is_public")
-    search_fields = ("title", "body", "url")
-    ordering = ("-published_at",)
+@admin.register(Card)
+class CardAdmin(admin.ModelAdmin):
+    list_display = ("timeframe", "period_start", "status", "title", "article_count")
+    list_filter = ("timeframe", "status")
+    search_fields = ("slug", "title", "summary", "source_name")
+    ordering = ("-period_start",)
 
 
-@admin.register(HourlyBrief)
-class HourlyBriefAdmin(admin.ModelAdmin):
-    list_display = ("hour_start", "title", "article_count")
-    search_fields = ("title", "summary", "slug")
-    ordering = ("-hour_start",)
+@admin.register(CardArticle)
+class CardArticleAdmin(admin.ModelAdmin):
+    list_display = ("title", "kind", "card", "created_at")
+    list_filter = ("kind", "card__timeframe")
+    search_fields = ("title", "summary")
+    ordering = ("-created_at",)

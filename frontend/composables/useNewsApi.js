@@ -2,23 +2,18 @@ export const useNewsApi = () => {
   const config = useRuntimeConfig()
   const baseUrl = (process.server ? config.apiBaseUrl : config.public.apiBaseUrl).replace(/\/$/, '')
 
-  const getSummary = (limit = 5) => $fetch(`${baseUrl}/articles/summary/?limit=${limit}`)
   const getHealth = () => $fetch(`${baseUrl}/health/`)
-  const getCrawlerStatus = () => $fetch(`${baseUrl}/crawler/status/`)
-  const getCrawlerLogs = (params = {}) => $fetch(`${baseUrl}/crawler/logs/`, { params })
-  const getCurrentBrief = () => $fetch(`${baseUrl}/briefs/current/`)
-  const getBriefHeadlines = (limit = 12) => $fetch(`${baseUrl}/briefs/headlines/?limit=${limit}`)
-  const getBrief = (slug) => $fetch(`${baseUrl}/briefs/${slug}/`)
-  const getBriefs = () => $fetch(`${baseUrl}/briefs/`)
+  const getLastHour = () => $fetch(`${baseUrl}/lasthour/`)
+  const getBriefs = (params = {}) => {
+    const { page = 0, limit = 10 } = params
+    return $fetch(`${baseUrl}/briefs/`, { query: { page, limit } })
+  }
+  const getArticle = (id) => $fetch(`${baseUrl}/articles/${id}/`)
 
   return {
-    getSummary,
     getHealth,
-    getCrawlerStatus,
-    getCrawlerLogs,
-    getCurrentBrief,
-    getBriefHeadlines,
-    getBrief,
+    getLastHour,
     getBriefs,
+    getArticle,
   }
 }

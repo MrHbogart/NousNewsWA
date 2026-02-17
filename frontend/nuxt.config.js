@@ -3,6 +3,12 @@ import { defineNuxtConfig } from 'nuxt/config'
 export default defineNuxtConfig({
   ssr: true,
   devtools: { enabled: false },
+  future: {
+    compatibilityVersion: 3,
+  },
+  nitro: {
+    compatibilityDate: '2026-02-04',
+  },
   experimental: {
     appManifest: false,
   },
@@ -25,7 +31,7 @@ export default defineNuxtConfig({
       meta: [
         {
           name: 'description',
-          content: 'NousNews delivers curated, crawler-driven reporting from the sources that matter.',
+          content: 'NousNews delivers curated, agent-driven reporting from the sources that matter.',
         },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],

@@ -28,23 +28,23 @@ for attempt in range(1, 31):
         time.sleep(1)
 PY
 
-python manage.py makemigrations core articles crawler
+python manage.py makemigrations core articles dataset agent
 python manage.py migrate --noinput
 python manage.py collectstatic --noinput
-python manage.py add_seeds
+python manage.py seed_sources
+python manage.py seed_prices
 python manage.py shell <<'PY'
 import os
 from django.contrib.auth import get_user_model
 
-username = os.getenv("DJANGO_SUPERUSER_USERNAME")
-email = os.getenv("DJANGO_SUPERUSER_EMAIL")
-password = os.getenv("DJANGO_SUPERUSER_PASSWORD")
+username = os.getenv("DJANGO_SUPERUSER_USERNAME", "admin")
+email = os.getenv("DJANGO_SUPERUSER_EMAIL", "admin@example.com")
+password = os.getenv("DJANGO_SUPERUSER_PASSWORD", "adminadmin")
 
-if username and email and password:
-    User = get_user_model()
-    exists = User.objects.filter(username=username).exists() or User.objects.filter(email=email).exists()
-    if not exists:
-        User.objects.create_superuser(username=username, email=email, password=password)
+User = get_user_model()
+exists = User.objects.filter(username=username).exists() or User.objects.filter(email=email).exists()
+if not exists:
+    User.objects.create_superuser(username=username, email=email, password=password)
 PY
 
 exec "$@"

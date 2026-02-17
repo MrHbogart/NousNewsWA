@@ -10,7 +10,7 @@
     "start": "nuxt start"
   },
   "dependencies": {
-    "nuxt": "3.13.1"
+    "nuxt": "^3.21.0"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.14",

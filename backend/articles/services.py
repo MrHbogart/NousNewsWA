@@ -2,18 +2,7 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from django.utils import timezone
-
-from articles.models import Article, HourlyBrief
-from crawler.llm import LLMClient
-from crawler.models import CrawlerConfig
-
-
-def get_crawler_config() -> CrawlerConfig:
-    config = CrawlerConfig.objects.first()
-    if config is None:
-        config = CrawlerConfig.objects.create()
-    return config
+from articles.models import AssetCandle, AssetSeries
 
 
 def get_hour_window(at_time):
@@ -22,86 +11,82 @@ def get_hour_window(at_time):
     return start, end
 
 
-def build_hourly_brief(at_time=None) -> HourlyBrief:
-    now = at_time or timezone.now()
-    hour_start, hour_end = get_hour_window(now)
-    slug = hour_start.strftime("%Y-%m-%d-%H")
-    config = get_crawler_config()
-
-    existing = HourlyBrief.objects.filter(hour_start=hour_start).first()
-    articles = list(
-        Article.objects.filter(published_at__gte=hour_start, published_at__lt=hour_end)
-        .order_by("-published_at")[: config.brief_max_articles]
-    )
-    article_count = len(articles)
-    prompt = build_brief_prompt(articles, hour_start, config, existing.summary if existing else "")
-
-    llm = LLMClient(config)
-    result = llm.generate_brief(prompt) if llm.enabled else None
-
-    if result:
-        title = result.title or f"Market brief {hour_start:%H:00}"
-        summary = result.summary or fallback_summary(articles)
-        references = result.references or [a.url for a in articles[:5]]
-    else:
-        title = f"Market brief {hour_start:%H:00}"
-        summary = fallback_summary(articles)
-        references = [a.url for a in articles[:5]]
-
-    brief, _ = HourlyBrief.objects.update_or_create(
-        hour_start=hour_start,
-        defaults={
-            "hour_end": hour_end,
-            "slug": slug,
-            "title": title,
-            "summary": summary,
-            "references": references,
-            "article_count": article_count,
-        },
-    )
-    return brief
-
-
-def build_brief_prompt(articles, hour_start, config: CrawlerConfig, previous_summary: str) -> str:
-    lines = []
-    for article in articles:
-        published = article.published_at.isoformat() if article.published_at else ""
-        body_snippet = (article.body or "").replace("\n", " ").strip()
-        if len(body_snippet) > 280:
-            body_snippet = body_snippet[:277] + "..."
-        lines.append(
-            "- {title} ({source}, {published})\n  URL: {url}\n  Snippet: {snippet}".format(
-                title=(article.title or "Untitled").strip(),
-                source=(article.source or "").strip(),
-                published=published,
-                url=article.url,
-                snippet=body_snippet,
-            )
+def get_period_window(at_time, timeframe: str):
+    if timeframe == "hour":
+        return get_hour_window(at_time)
+    if timeframe == "day":
+        start = at_time.replace(hour=0, minute=0, second=0, microsecond=0)
+        end = start + timedelta(days=1)
+        return start, end
+    if timeframe == "week":
+        start = (at_time - timedelta(days=at_time.weekday())).replace(
+            hour=0, minute=0, second=0, microsecond=0
         )
-
-    articles_block = "\n".join(lines) or "No articles available."
-    if len(articles_block) > config.brief_max_context_chars:
-        articles_block = articles_block[: config.brief_max_context_chars] + "\n..."
-
-    base_prompt = (
-        config.brief_prompt_template
-        .replace("{articles}", articles_block)
-        .replace("{hour_start}", hour_start.isoformat())
-    )
-    if previous_summary:
-        base_prompt += f"\n\nPrevious summary:\n{previous_summary.strip()}\n"
-    return base_prompt
-
-
-def fallback_summary(articles) -> str:
-    if not articles:
-        return "No verified updates published in the last hour."
-    summary_parts = []
-    for article in articles[:5]:
-        title = (article.title or "").strip()
-        source = (article.source or "").strip()
-        if title and source:
-            summary_parts.append(f"{title} — {source}")
+        end = start + timedelta(days=7)
+        return start, end
+    if timeframe == "month":
+        start = at_time.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        if start.month == 12:
+            end = start.replace(year=start.year + 1, month=1)
         else:
-            summary_parts.append(title or source)
-    return " · ".join([p for p in summary_parts if p]) or "No verified updates in the last hour."
+            end = start.replace(month=start.month + 1)
+        return start, end
+    raise ValueError(f"Unsupported timeframe: {timeframe}")
+
+
+def resolve_timeframe(timeframe: str) -> tuple[int, int, str]:
+    mapping = {
+        "hour": (1, 60, "1m"),
+        "day": (15, 96, "15m"),
+        "week": (240, 42, "4h"),
+        "month": (1440, 30, "1d"),
+    }
+    return mapping.get(timeframe, (1, 60, "1m"))
+
+
+def aggregate_candles(
+    *,
+    series: AssetSeries,
+    start,
+    end,
+    interval_minutes: int,
+    max_buckets: int,
+) -> list[dict]:
+    if interval_minutes <= 0 or max_buckets <= 0:
+        return []
+    candles = list(
+        AssetCandle.objects.filter(series=series, timestamp__gte=start, timestamp__lt=end)
+        .order_by("timestamp")
+    )
+    if not candles:
+        return []
+    buckets: list[dict] = []
+    bucket = None
+    bucket_index = None
+    start_ts = start
+    for candle in candles:
+        minutes = int((candle.timestamp - start_ts).total_seconds() // 60)
+        index = minutes // interval_minutes
+        if bucket_index is None or index != bucket_index:
+            if bucket is not None:
+                buckets.append(bucket)
+            bucket_index = index
+            bucket_start = start_ts + timedelta(minutes=index * interval_minutes)
+            bucket = {
+                "timestamp": bucket_start,
+                "open": candle.open,
+                "high": candle.high,
+                "low": candle.low,
+                "close": candle.close,
+                "volume": candle.volume,
+            }
+        else:
+            bucket["high"] = max(bucket["high"], candle.high)
+            bucket["low"] = min(bucket["low"], candle.low)
+            bucket["close"] = candle.close
+            bucket["volume"] += candle.volume
+    if bucket is not None:
+        buckets.append(bucket)
+    if len(buckets) > max_buckets:
+        buckets = buckets[-max_buckets:]
+    return buckets

@@ -1,13 +1,17 @@
+from datetime import timedelta
+from uuid import UUID
+
+from django.db.models import Case, IntegerField, Value, When
 from django.utils import timezone
 from rest_framework import status
-from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from articles.models import Article, HourlyBrief
-from articles.serializers import ArticleIngestSerializer, ArticleSerializer, HourlyBriefSerializer
-from articles.services import build_hourly_brief
-from core.viewsets import PublicReadModelViewSet
+from articles.models import Card, CardArticle
+from articles.serializers import (
+    CardArticleDetailSerializer,
+    CardArticleListSerializer,
+)
 
 
 class HealthView(APIView):
@@ -18,94 +22,205 @@ class HealthView(APIView):
         return Response({"status": "ok"})
 
 
-class ArticleViewSet(PublicReadModelViewSet):
-    queryset = Article.objects.all()
-    serializer_class = ArticleSerializer
-
-    @action(detail=False, methods=["post"])
-    def ingest(self, request):
-        serializer = ArticleIngestSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
-        data = serializer.validated_data
-        url = data.pop("url")
-        article, created = Article.objects.update_or_create(url=url, defaults=data)
-        return Response(
-            {"status": "ok", "id": article.id, "created": created},
-            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
-        )
-
-
-class ArticleSummaryView(APIView):
+class LastHourView(APIView):
     authentication_classes = []
     permission_classes = []
 
     def get(self, request):
-        limit_raw = request.query_params.get("limit", "5")
+        now = timezone.now()
+        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+
+        current_open_article = (
+            CardArticle.objects.select_related("card")
+            .filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=Card.TIMEFRAME_HOUR,
+                card__period_start=current_hour_start,
+                card__status=Card.STATUS_OPEN,
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if current_open_article:
+            serializer = CardArticleDetailSerializer(current_open_article)
+            return Response(serializer.data)
+
+        article = (
+            CardArticle.objects.select_related("card")
+            .filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=Card.TIMEFRAME_HOUR,
+                card__status=Card.STATUS_FINAL,
+            )
+            .order_by("-card__period_start")
+            .first()
+        )
+        if article:
+            serializer = CardArticleDetailSerializer(article)
+            return Response(serializer.data)
+        fallback = {
+            "id": None,
+            "timeframe": Card.TIMEFRAME_HOUR,
+            "period_start": now.replace(minute=0, second=0, microsecond=0),
+            "period_end": (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)),
+            "hour_start": now.replace(minute=0, second=0, microsecond=0),
+            "published_at": None,
+            "slug": "",
+            "title": "Awaiting Next Finalized Financial Market Brief",
+            "summary": "No finalized high-impact financial updates were published for the latest closed hour yet.",
+            "article_content": "",
+            "impacts": [],
+            "references": [],
+            "article_count": 0,
+            "source_name": "",
+            "importance_score": 1,
+            "importance_reason": "No market-moving records have been accepted yet.",
+            "kind": CardArticle.KIND_MAIN,
+            "is_daily_summary": False,
+            "price_series": [],
+            "related_articles": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        return Response(fallback)
+
+
+class Last24HoursView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        now = timezone.now()
+        current_hour_start = now.replace(minute=0, second=0, microsecond=0)
+        period_end = current_hour_start + timedelta(hours=1)
+        period_start = period_end - timedelta(hours=24)
+
+        current_open_article = (
+            CardArticle.objects.select_related("card")
+            .filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=Card.TIMEFRAME_DAY,
+                card__period_start=period_start,
+                card__status=Card.STATUS_OPEN,
+            )
+            .order_by("-updated_at")
+            .first()
+        )
+        if current_open_article:
+            serializer = CardArticleDetailSerializer(current_open_article)
+            return Response(serializer.data)
+
+        article = (
+            CardArticle.objects.select_related("card")
+            .filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=Card.TIMEFRAME_DAY,
+                card__status=Card.STATUS_FINAL,
+            )
+            .order_by("-card__period_start")
+            .first()
+        )
+        if article:
+            serializer = CardArticleDetailSerializer(article)
+            return Response(serializer.data)
+
+        fallback = {
+            "id": None,
+            "timeframe": Card.TIMEFRAME_DAY,
+            "period_start": period_start,
+            "period_end": period_end,
+            "hour_start": period_start,
+            "published_at": None,
+            "slug": "",
+            "title": "Awaiting 24-Hour Financial Market Summary",
+            "summary": "No eligible market-moving records were gathered for the current rolling 24-hour window yet.",
+            "article_content": "",
+            "impacts": [],
+            "references": [],
+            "article_count": 0,
+            "source_name": "",
+            "importance_score": 1,
+            "importance_reason": "No market-moving records have been accepted yet.",
+            "kind": CardArticle.KIND_MAIN,
+            "is_daily_summary": True,
+            "price_series": [],
+            "related_articles": [],
+            "created_at": now,
+            "updated_at": now,
+        }
+        return Response(fallback)
+
+
+class BriefListView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        # Get pagination params (default page=0, limit=10)
         try:
-            limit = int(limit_raw)
-        except ValueError:
-            limit = 5
-        limit = max(1, min(limit, 10))
-
-        brief = build_hourly_brief()
-        articles = list(
-            Article.objects.filter(is_public=True)
-            .order_by("-published_at")
-            .values("id", "source", "title", "published_at", "url")[:limit]
+            page = int(request.query_params.get('page', 0))
+            limit = int(request.query_params.get('limit', 10))
+        except (ValueError, TypeError):
+            page = 0
+            limit = 10
+        
+        # Ensure sensible limits
+        limit = min(limit, 100)  # Max 100 per page
+        limit = max(limit, 1)    # Min 1 per page
+        page = max(page, 0)      # Min page 0
+        
+        # Get all main articles, ordered by period_start (newest first)
+        all_articles = (
+            CardArticle.objects.select_related("card")
+            .filter(
+                kind=CardArticle.KIND_MAIN,
+                card__status=Card.STATUS_FINAL,
+            )
+            .annotate(
+                timeframe_order=Case(
+                    When(card__timeframe=Card.TIMEFRAME_HOUR, then=Value(1)),
+                    When(card__timeframe=Card.TIMEFRAME_DAY, then=Value(2)),
+                    When(card__timeframe=Card.TIMEFRAME_WEEK, then=Value(3)),
+                    When(card__timeframe=Card.TIMEFRAME_MONTH, then=Value(4)),
+                    default=Value(9),
+                    output_field=IntegerField(),
+                )
+            )
+            .order_by("timeframe_order", "-card__period_start")
         )
-        summary = brief.summary or "No crawled summaries yet."
-        return Response(
-            {
-                "summary": summary,
-                "count": len(articles),
-                "items": articles,
-                "as_of": timezone.now(),
-                "brief_id": brief.id,
-                "brief_slug": brief.slug,
-                "brief_title": brief.title,
-                "brief_hour_start": brief.hour_start,
-                "brief_hour_end": brief.hour_end,
-            }
-        )
+        
+        # Get total count
+        total_count = all_articles.count()
+        
+        # Apply pagination
+        start = page * limit
+        end = start + limit
+        items = list(all_articles[start:end])
+        
+        serializer = CardArticleListSerializer(items, many=True)
+        return Response({
+            "results": serializer.data,
+            "count": total_count,
+            "page": page,
+            "limit": limit,
+        })
 
 
-class HourlyBriefViewSet(PublicReadModelViewSet):
-    queryset = HourlyBrief.objects.all()
-    serializer_class = HourlyBriefSerializer
-    lookup_field = "slug"
+class ArticleDetailView(APIView):
+    authentication_classes = []
+    permission_classes = []
 
-    @action(detail=False, methods=["get"])
-    def current(self, request):
-        brief = build_hourly_brief()
-        serializer = self.get_serializer(brief)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def previous(self, request):
-        limit_raw = request.query_params.get("limit", "24")
+    def get(self, request, pk: str):
+        article_qs = CardArticle.objects.select_related("card")
+        article = None
         try:
-            limit = int(limit_raw)
-        except ValueError:
-            limit = 24
-        limit = max(1, min(limit, 168))
-        brief = build_hourly_brief()
-        previous_items = (
-            HourlyBrief.objects.filter(hour_start__lt=brief.hour_start)
-            .order_by("-hour_start")[:limit]
-        )
-        serializer = self.get_serializer(previous_items, many=True)
-        return Response(serializer.data)
-
-    @action(detail=False, methods=["get"])
-    def headlines(self, request):
-        limit_raw = request.query_params.get("limit", "12")
-        try:
-            limit = int(limit_raw)
-        except ValueError:
-            limit = 12
-        limit = max(1, min(limit, 48))
-        items = (
-            HourlyBrief.objects.order_by("-hour_start")
-            .values("slug", "title", "hour_start")[:limit]
-        )
-        return Response({"results": list(items)})
+            article_uuid = UUID(str(pk))
+            article = article_qs.filter(uuid=article_uuid).first()
+        except (ValueError, TypeError):
+            article = None
+        if not article:
+            article = article_qs.filter(slug=pk).first()
+        if article:
+            serializer = CardArticleDetailSerializer(article)
+            return Response(serializer.data)
+        return Response({"detail": "Not found."}, status=status.HTTP_404_NOT_FOUND)

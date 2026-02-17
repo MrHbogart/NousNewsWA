@@ -1,93 +1,154 @@
 <template>
-  <section class="enter-stage" style="--delay: 80ms">
-    <div class="news-card">
-      <p v-if="briefPending" class="news-title">Loading the latest brief...</p>
-      <p v-else-if="briefError" class="news-title">
-        We could not reach the crawler brief. Check the API base URL.
-      </p>
-      <p v-else class="news-title">
-        {{ briefText }}
-      </p>
-      <div class="news-refresh">Updated {{ briefUpdatedAt || 'just now' }}</div>
+  <div class="page-container">
+    <!-- Current hour card (always at top) -->
+    <div v-if="currentCard" class="current-card-section">
+      <HourlyCard :card="currentCard" :is-current="true" />
     </div>
 
-    <div class="news-list">
-      <div class="news-list-head">
-        <div class="news-list-title">Recent headlines</div>
-        <NuxtLink to="/ops" class="news-list-link">Crawler logs</NuxtLink>
+    <!-- Historical cards (hourly then daily) -->
+    <div class="cards-stack">
+      <!-- Hourly cards -->
+      <HourlyCard
+        v-for="(card, index) in historicalHourlyCards"
+        :key="`hourly-${card.id}`"
+        :card="card"
+        :is-current="false"
+        :style="{ '--animation-delay': `${index * 50}ms` }"
+      />
+
+      <!-- Daily summary cards -->
+      <DailyCard
+        v-for="(card, index) in dailyCards"
+        :key="`daily-${card.id}`"
+        :card="card"
+        :related-article-id="card.related_article_id"
+        :style="{ '--animation-delay': `${(historicalHourlyCards.length + index) * 50}ms` }"
+      />
+
+      <!-- Load more sentinel -->
+      <div ref="sentinel" class="scroll-sentinel"></div>
+
+      <!-- End of list indicator -->
+      <div v-if="!infiniteScroll.hasMore && totalCards > 0" class="end-of-list">
+        <div class="end-of-list-visual"></div>
+        <p class="end-of-list-text">You've reached the beginning of our records</p>
       </div>
-      <ul class="news-items">
-        <li v-for="item in recentItems" :key="item.slug" class="news-item">
-          <NuxtLink
-            :to="`/briefs/${item.slug}`"
-            class="news-item-link"
-            target="_blank"
-            rel="noreferrer"
-          >
-            <span class="news-item-time">{{ formatTime(item) }}</span>
-            <span class="news-item-title">{{ item.title || 'Untitled' }}</span>
-          </NuxtLink>
-        </li>
-      </ul>
+
+      <!-- Empty state -->
+      <div v-if="totalCards === 0 && !infiniteScroll.isLoading" class="empty-state">
+        <p class="empty-state-text">No articles available yet. Check back soon.</p>
+      </div>
+
+      <!-- Loading indicator -->
+      <div v-if="infiniteScroll.isLoading" class="loading-indicator">
+        <div class="loading-spinner"></div>
+        <p>Loading more articles...</p>
+      </div>
     </div>
-  </section>
+  </div>
 </template>
 
 <script setup>
+const api = useNewsApi()
 const refreshIntervalMs = 20000
 let refreshTimer
-const api = useNewsApi()
 
-const {
-  data: currentBrief,
-  pending: briefPending,
-  error: briefError,
-  refresh: refreshBrief,
-} = await useAsyncData('current-brief', () => api.getCurrentBrief(), {
-  server: false,
-})
-
-const {
-  data: headlines,
-  refresh: refreshHeadlines,
-} = await useAsyncData('brief-headlines', () => api.getBriefHeadlines(8), {
-  server: false,
-})
-
-const briefText = computed(() => currentBrief.value?.summary || 'No summary available yet.')
-const briefUpdatedAt = computed(() => formatDate(currentBrief.value?.updated_at))
-const recentItems = computed(() =>
-  Array.isArray(headlines.value?.results) ? headlines.value.results : []
-)
-
-function formatDate(value) {
-  if (!value) return ''
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ''
-  return date.toLocaleString('en-US', {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+// Fetch history for infinite scroll
+const fetchHistoricalCards = async (page, pageSize) => {
+  try {
+    const response = await api.getBriefs({ page, limit: pageSize })
+    return response?.results || []
+  } catch (err) {
+    console.error('Error fetching historical cards:', err)
+    return []
+  }
 }
 
-function formatTime(item) {
-  const value = item.hour_start || item.created_at
-  const date = new Date(value || '')
-  if (Number.isNaN(date.getTime())) return 'Just now'
-  return date.toLocaleTimeString('en-US', {
-    hour: '2-digit',
-    minute: '2-digit',
+const infiniteScroll = useInfiniteScroll(fetchHistoricalCards, {
+  threshold: 500,
+  pageSize: 10,
+  autoLoad: true,
+})
+
+// Current card (updating hourly)
+const currentCard = ref(null)
+const currentCardPending = ref(true)
+const currentCardError = ref(null)
+
+// Get initial current card
+const { pending: briefPending, error: briefError } = await useAsyncData(
+  'current-hour',
+  async () => {
+    try {
+      const brief = await api.getLastHour()
+      currentCard.value = brief
+      return brief
+    } catch (err) {
+      currentCardError.value = err
+      return null
+    }
+  },
+  { server: false }
+)
+
+watchEffect(() => {
+  currentCardPending.value = briefPending.value
+  currentCardError.value = briefError.value
+})
+
+// Separate historical cards into hourly and daily
+const historicalHourlyCards = computed(() => {
+  const all = infiniteScroll.items.value || []
+  return all.filter((card) => {
+    // Filter for hourly cards (not daily summaries)
+    return !card.is_daily_summary && card.id !== currentCard.value?.id
   })
+})
+
+const dailyCards = computed(() => {
+  const all = infiniteScroll.items.value || []
+  return all.filter((card) => card.is_daily_summary === true)
+})
+
+const totalCards = computed(
+  () => (currentCard.value ? 1 : 0) + historicalHourlyCards.value.length + dailyCards.value.length
+)
+
+// Refresh current card periodically
+async function refreshCurrentCard() {
+  try {
+    const latest = await api.getLastHour()
+    if (latest) {
+      currentCard.value = latest
+    }
+  } catch (err) {
+    // Ignore polling errors
+  }
+}
+
+// Refresh history periodically
+async function refreshHistory() {
+  try {
+    const latest = await api.getBriefs({ page: 0, limit: 10 })
+    if (latest?.results) {
+      // Reload infinite scroll if the first item changed
+      const currentFirst = infiniteScroll.items.value[0]
+      if (currentFirst && latest.results[0]?.id !== currentFirst.id) {
+        infiniteScroll.reset()
+        const newItems = await fetchHistoricalCards(0, 10)
+        infiniteScroll.items.value = newItems
+        infiniteScroll.page.value = 1
+      }
+    }
+  } catch (err) {
+    // Ignore polling errors
+  }
 }
 
 onMounted(() => {
-  refreshBrief()
-  refreshHeadlines()
   refreshTimer = setInterval(() => {
-    refreshBrief()
-    refreshHeadlines()
+    refreshCurrentCard()
+    refreshHistory()
   }, refreshIntervalMs)
 })
 
@@ -96,12 +157,135 @@ onBeforeUnmount(() => {
 })
 
 useHead({
-  title: 'NousNews · Brief',
+  title: 'NousNews · Live Brief',
   meta: [
     {
       name: 'description',
-      content: 'NousNews delivers a live crawler brief with the latest headlines.',
+      content: 'NousNews: Agent-driven economic intelligence with real-time market analysis.',
     },
   ],
 })
 </script>
+
+<style scoped>
+.page-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding-bottom: 48px;
+}
+
+.current-card-section {
+  padding-top: 32px;
+  padding-bottom: 0;
+}
+
+.cards-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 24px;
+}
+
+.scroll-sentinel {
+  height: 2px;
+  visibility: hidden;
+}
+
+.end-of-list {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 60px 20px;
+  margin-top: 40px;
+}
+
+.end-of-list-visual {
+  width: 40px;
+  height: 2px;
+  background: linear-gradient(to right, transparent, var(--line), transparent);
+  position: relative;
+}
+
+.end-of-list-visual::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 6px;
+  height: 6px;
+  background: var(--ink-soft);
+  border-radius: 50%;
+}
+
+.end-of-list-text {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+}
+
+.empty-state-text {
+  margin: 0;
+  font-size: 15px;
+  color: var(--ink-soft);
+  max-width: 300px;
+}
+
+.loading-indicator {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 20px;
+}
+
+.loading-spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 800ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.loading-indicator p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+@media (max-width: 640px) {
+  .page-container {
+    padding-bottom: 32px;
+  }
+
+  .current-card-section {
+    padding-top: 24px;
+  }
+
+  .cards-stack {
+    margin-top: 16px;
+  }
+}
+</style>

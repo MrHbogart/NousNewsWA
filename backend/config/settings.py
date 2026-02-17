@@ -27,7 +27,10 @@ INSTALLED_APPS = [
     "corsheaders",
     "core.apps.CoreConfig",
     "articles.apps.ArticlesConfig",
-    "crawler.apps.CrawlerConfig",
+    "dataset.apps.DatasetConfig",
+    "agent.apps.AgentConfig",
+    "prices.apps.PricesConfig",
+    "cards.apps.CardsConfig",
 ]
 
 MIDDLEWARE = [
@@ -136,8 +139,21 @@ LOGGING = {
     },
 }
 
-CRAWLER_LLM_TIMEOUT_SECONDS = float(
-    os.getenv("CRAWLER_LLM_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "45"))
+AGENT_LLM_TIMEOUT_SECONDS = float(
+    os.getenv("AGENT_LLM_TIMEOUT_SECONDS", os.getenv("CRAWLER_LLM_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "45")))
 )
-CRAWLER_FETCH_TIMEOUT_SECONDS = float(os.getenv("CRAWLER_FETCH_TIMEOUT_SECONDS", "20"))
-CRAWLER_LOG_MAX_CHARS = int(os.getenv("CRAWLER_LOG_MAX_CHARS", "200000"))
+AGENT_FETCH_TIMEOUT_SECONDS = float(
+    os.getenv("AGENT_FETCH_TIMEOUT_SECONDS", os.getenv("CRAWLER_FETCH_TIMEOUT_SECONDS", "20"))
+)
+AGENT_SOURCE_FETCH_WORKERS = int(os.getenv("AGENT_SOURCE_FETCH_WORKERS", "8"))
+AGENT_LOG_MAX_CHARS = int(
+    os.getenv("AGENT_LOG_MAX_CHARS", os.getenv("CRAWLER_LOG_MAX_CHARS", "200000"))
+)
+AGENT_LLM_MAX_REQUESTS_PER_RUN = int(os.getenv("AGENT_LLM_MAX_REQUESTS_PER_RUN", "2"))
+AGENT_LLM_RESERVED_FOR_ARTICLES = int(os.getenv("AGENT_LLM_RESERVED_FOR_ARTICLES", "2"))
+AGENT_ENABLE_ECONOMIST_AGENT = os.getenv("AGENT_ENABLE_ECONOMIST_AGENT", "false").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
