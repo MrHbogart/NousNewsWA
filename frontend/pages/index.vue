@@ -5,25 +5,17 @@
       <HourlyCard :card="currentCard" :is-current="true" />
     </div>
 
-    <!-- Historical cards (hourly then daily) -->
+    <!-- Historical cards, newest first (hourly and daily interleaved) -->
     <div class="cards-stack">
-      <!-- Hourly cards -->
-      <HourlyCard
-        v-for="(card, index) in historicalHourlyCards"
-        :key="`hourly-${card.id}`"
-        :card="card"
-        :is-current="false"
-        :style="{ '--animation-delay': `${index * 50}ms` }"
-      />
-
-      <!-- Daily summary cards -->
-      <DailyCard
-        v-for="(card, index) in dailyCards"
-        :key="`daily-${card.id}`"
-        :card="card"
-        :related-article-id="card.related_article_id"
-        :style="{ '--animation-delay': `${(historicalHourlyCards.length + index) * 50}ms` }"
-      />
+      <template v-for="(card, index) in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'hourly'}-${card.id}`">
+        <DailyCard
+          v-if="card.is_daily_summary"
+          :card="card"
+          :related-article-id="card.related_article_id"
+          :style="{ '--animation-delay': `${index * 50}ms` }"
+        />
+        <HourlyCard v-else :card="card" :is-current="false" :style="{ '--animation-delay': `${index * 50}ms` }" />
+      </template>
 
       <!-- Load more sentinel -->
       <div ref="sentinel" class="scroll-sentinel"></div>
@@ -50,110 +42,54 @@
 
 <script setup>
 const api = useNewsApi()
-const refreshIntervalMs = 20000
-let refreshTimer
+const pageSize = 10
 
-// Fetch history for infinite scroll
-const fetchHistoricalCards = async (page, pageSize) => {
-  try {
-    const response = await api.getBriefs({ page, limit: pageSize })
-    return response?.results || []
-  } catch (err) {
-    console.error('Error fetching historical cards:', err)
-    return []
-  }
-}
-
-const infiniteScroll = useInfiniteScroll(fetchHistoricalCards, {
-  threshold: 500,
-  pageSize: 10,
-  autoLoad: true,
-})
-
-// Current card (updating hourly)
-const currentCard = ref(null)
-const currentCardPending = ref(true)
-const currentCardError = ref(null)
-
-// Get initial current card
-const { pending: briefPending, error: briefError } = await useAsyncData(
-  'current-hour',
-  async () => {
+const infiniteScroll = useInfiniteScroll(
+  async (page, limit) => {
     try {
-      const brief = await api.getLastHour()
-      currentCard.value = brief
-      return brief
+      const response = await api.getBriefs({ page, limit })
+      return response?.results || []
     } catch (err) {
-      currentCardError.value = err
-      return null
+      console.error('Error fetching historical cards:', err)
+      return []
     }
   },
-  { server: false }
+  { threshold: 500, pageSize, autoLoad: true }
 )
+// `ref="sentinel"` in the template only binds to a top-level ref of this name;
+// without this alias the composable's IntersectionObserver never attaches.
+const sentinel = infiniteScroll.sentinel
 
-watchEffect(() => {
-  currentCardPending.value = briefPending.value
-  currentCardError.value = briefError.value
+// Rendered on the server; live updates arrive over SSE afterwards.
+const { data: initial } = await useAsyncData('home', async () => {
+  const [lasthour, briefs] = await Promise.all([
+    api.getLastHour().catch(() => null),
+    api.getBriefs({ page: 0, limit: pageSize }).catch(() => null),
+  ])
+  return { lasthour, briefs: briefs?.results || [] }
 })
 
-// Separate historical cards into hourly and daily
-const historicalHourlyCards = computed(() => {
-  const all = infiniteScroll.items.value || []
-  return all.filter((card) => {
-    // Filter for hourly cards (not daily summaries)
-    return !card.is_daily_summary && card.id !== currentCard.value?.id
-  })
-})
+const currentCard = ref(initial.value?.lasthour || null)
+if (initial.value?.briefs?.length) infiniteScroll.seed(initial.value.briefs)
 
-const dailyCards = computed(() => {
-  const all = infiniteScroll.items.value || []
-  return all.filter((card) => card.is_daily_summary === true)
-})
-
-const totalCards = computed(
-  () => (currentCard.value ? 1 : 0) + historicalHourlyCards.value.length + dailyCards.value.length
+const historicalCards = computed(() =>
+  (infiniteScroll.items.value || []).filter((card) => card.id !== currentCard.value?.id)
 )
+const totalCards = computed(() => (currentCard.value ? 1 : 0) + historicalCards.value.length)
 
-// Refresh current card periodically
-async function refreshCurrentCard() {
-  try {
-    const latest = await api.getLastHour()
-    if (latest) {
-      currentCard.value = latest
-    }
-  } catch (err) {
-    // Ignore polling errors
-  }
+// Prepend newly published briefs without discarding pages already scrolled into.
+function mergeLatestBriefs(newest) {
+  if (!newest?.length) return
+  const knownIds = new Set(infiniteScroll.items.value.map((item) => item.id))
+  const fresh = newest.filter((item) => !knownIds.has(item.id))
+  if (fresh.length) infiniteScroll.items.value = [...fresh, ...infiniteScroll.items.value]
 }
 
-// Refresh history periodically
-async function refreshHistory() {
-  try {
-    const latest = await api.getBriefs({ page: 0, limit: 10 })
-    if (latest?.results) {
-      // Reload infinite scroll if the first item changed
-      const currentFirst = infiniteScroll.items.value[0]
-      if (currentFirst && latest.results[0]?.id !== currentFirst.id) {
-        infiniteScroll.reset()
-        const newItems = await fetchHistoricalCards(0, 10)
-        infiniteScroll.items.value = newItems
-        infiniteScroll.page.value = 1
-      }
-    }
-  } catch (err) {
-    // Ignore polling errors
-  }
-}
-
-onMounted(() => {
-  refreshTimer = setInterval(() => {
-    refreshCurrentCard()
-    refreshHistory()
-  }, refreshIntervalMs)
-})
-
-onBeforeUnmount(() => {
-  if (refreshTimer) clearInterval(refreshTimer)
+useEventStream('/stream/home/', {
+  home: (payload) => {
+    if (payload?.lasthour) currentCard.value = payload.lasthour
+    mergeLatestBriefs(payload?.briefs?.results)
+  },
 })
 
 useHead({

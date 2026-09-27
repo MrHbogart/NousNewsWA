@@ -1,41 +1,41 @@
 from __future__ import annotations
 
-from django.http import JsonResponse
-from django.views import View
-from django.utils import timezone
+from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from articles.models import AssetSeries
-from dataset.models import RawCandle
+from articles.models import AssetCandle, AssetSeries
 
 
-class HealthView(View):
+class PublicView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+
+class HealthView(PublicView):
     def get(self, request):
-        return JsonResponse({"status": "ok"})
+        return Response({"status": "ok"})
 
 
-class SeriesListView(View):
+class SeriesListView(PublicView):
     def get(self, request):
         series = [
             {"symbol": s.symbol, "label": s.label, "timeframe": s.timeframe}
             for s in AssetSeries.objects.all().order_by("symbol")
         ]
-        return JsonResponse({"series": series})
+        return Response({"series": series})
 
 
-class SeriesLatestView(View):
+class SeriesLatestView(PublicView):
     def get(self, request, symbol: str):
         symbol = symbol.strip()
-        # Prefer articles.AssetCandle if present, otherwise fall back to dataset.RawCandle
-        latest = (
-            RawCandle.objects.filter(asset_symbol=symbol).order_by("-timestamp").first()
-        )
+        latest = AssetCandle.objects.filter(series__symbol=symbol).order_by("-timestamp").first()
         if latest is None:
-            return JsonResponse({"symbol": symbol, "latest": None})
-        return JsonResponse(
+            return Response({"symbol": symbol, "latest": None})
+        return Response(
             {
                 "symbol": symbol,
                 "latest": {
-                    "timestamp": latest.timestamp.isoformat(),
+                    "timestamp": latest.timestamp,
                     "open": latest.open,
                     "high": latest.high,
                     "low": latest.low,

@@ -162,10 +162,13 @@ const logs = computed(() => dashboard.value?.logs || [])
 const runForever = computed(() => state.value.run_forever || {})
 const agentState = computed(() => state.value.agent || {})
 const hasActionPending = computed(() => !!actionPending.value)
-const loopRunning = computed(() => !!runForever.value?.running)
+// `enabled` is the desired state; the worker container applies it within ~1s.
+const loopRunning = computed(() => !!runForever.value?.enabled)
 const loopPaused = computed(() => !!runForever.value?.paused)
 
-const runOnceDisabled = computed(() => hasActionPending.value || !!agentState.value?.running)
+const runOnceDisabled = computed(
+  () => hasActionPending.value || !!agentState.value?.running || !!runForever.value?.run_once_requested
+)
 const startDisabled = computed(() => hasActionPending.value || loopRunning.value)
 const pauseDisabled = computed(() => hasActionPending.value || !loopRunning.value || loopPaused.value)
 const resumeDisabled = computed(() => hasActionPending.value || !loopRunning.value || !loopPaused.value)
@@ -182,7 +185,7 @@ async function handleLogin() {
       throw new Error('No token returned by server')
     }
     if (process.client) {
-      localStorage.setItem(TOKEN_KEY, token.value)
+      sessionStorage.setItem(TOKEN_KEY, token.value)
     }
     password.value = ''
     await refreshDashboard()
@@ -199,7 +202,7 @@ function logout() {
   actionMessage.value = ''
   errorMessage.value = ''
   if (process.client) {
-    localStorage.removeItem(TOKEN_KEY)
+    sessionStorage.removeItem(TOKEN_KEY)
   }
   stopPolling()
 }
@@ -332,7 +335,7 @@ function formatMetadata(metadata) {
 
 onMounted(async () => {
   if (!process.client) return
-  const saved = localStorage.getItem(TOKEN_KEY) || ''
+  const saved = sessionStorage.getItem(TOKEN_KEY) || ''
   if (!saved) return
   token.value = saved
   await refreshDashboard()

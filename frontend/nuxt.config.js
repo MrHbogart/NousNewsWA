@@ -13,14 +13,24 @@ export default defineNuxtConfig({
     appManifest: false,
   },
   css: ['~/assets/css/fonts.css', '~/assets/css/tailwind.css', '~/assets/css/app.css'],
+  // Defaults only: Nuxt overrides these at runtime from NUXT_API_BASE_URL
+  // (server-side/SSR calls), NUXT_PUBLIC_API_BASE_URL (browser) and
+  // NUXT_PUBLIC_SITE_DOMAIN. process.env here would be frozen at build time.
   runtimeConfig: {
-    apiBaseUrl:
-      process.env.NUXT_INTERNAL_API_BASE_URL ||
-      process.env.NUXT_API_BASE_URL ||
-      'http://127.0.0.1:8081/api',
+    apiBaseUrl: 'http://127.0.0.1:8081/api',
     public: {
-      apiBaseUrl: process.env.NUXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8081/api',
-      siteDomain: process.env.NUXT_PUBLIC_SITE_DOMAIN || 'http://127.0.0.1:3001',
+      apiBaseUrl: 'http://127.0.0.1:8081/api',
+      siteDomain: 'http://127.0.0.1:3001',
+    },
+  },
+  routeRules: {
+    '/**': {
+      headers: {
+        'X-Content-Type-Options': 'nosniff',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'X-Frame-Options': 'DENY',
+        'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+      },
     },
   },
   components: [{ path: '~/components', pathPrefix: false }],
@@ -35,7 +45,7 @@ export default defineNuxtConfig({
         },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
-      link: [],
+      link: [{ rel: 'alternate', type: 'application/rss+xml', title: 'NousNews', href: '/rss.xml' }],
     },
   },
   postcss: {

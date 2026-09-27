@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from rest_framework.permissions import BasePermission
+from rest_framework.throttling import AnonRateThrottle
 
 from agent.control_auth import decode_control_token, extract_control_token
+
+
+class ControlLoginThrottle(AnonRateThrottle):
+    scope = "agent_control_login"
 
 
 class HasAgentControlToken(BasePermission):

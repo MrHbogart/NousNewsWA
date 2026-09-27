@@ -1,14 +1,17 @@
+const REQUEST_TIMEOUT_MS = 10000
+
 export const useNewsApi = () => {
   const config = useRuntimeConfig()
   const baseUrl = (process.server ? config.apiBaseUrl : config.public.apiBaseUrl).replace(/\/$/, '')
+  const request = (path, opts = {}) => $fetch(`${baseUrl}${path}`, { timeout: REQUEST_TIMEOUT_MS, ...opts })
 
-  const getHealth = () => $fetch(`${baseUrl}/health/`)
-  const getLastHour = () => $fetch(`${baseUrl}/lasthour/`)
+  const getHealth = () => request('/health/')
+  const getLastHour = () => request('/lasthour/')
   const getBriefs = (params = {}) => {
     const { page = 0, limit = 10 } = params
-    return $fetch(`${baseUrl}/briefs/`, { query: { page, limit } })
+    return request('/briefs/', { query: { page, limit } })
   }
-  const getArticle = (id) => $fetch(`${baseUrl}/articles/${id}/`)
+  const getArticle = (id) => request(`/articles/${id}/`)
 
   return {
     getHealth,

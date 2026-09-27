@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
-import time
-import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from datetime import timezone as dt_timezone
+import logging
 
 import httpx
+from defusedxml import ElementTree as ET
 from dateutil import parser as dtparser
 from django.utils import timezone
 
@@ -21,173 +22,103 @@ class PriceFeedStats:
     prices_recorded: int = 0
     api_feeds_checked: int = 0
     api_prices_recorded: int = 0
+    errors: list[str] = field(default_factory=list)
+
+
+logger = logging.getLogger(__name__)
+
+# AssetSeries.symbol -> provider ticker. Only these are requested, so a series
+# a provider can't serve (FRED, Treasury) never costs a failing call.
+YF_SYMBOLS = {"^GSPC": "^GSPC", "DX-Y.NYB": "DX-Y.NYB", "XAUUSD=X": "GC=F"}
+CCXT_SYMBOLS = {"BTC-USD": "BTC/USDT", "ETH-USD": "ETH/USDT"}
 
 
 def sync_price_feeds(*, user_agent: str | None = None) -> PriceFeedStats:
-    """Sync prices using hybrid approach: yfinance/ccxt first, then fallback to RSS/API.
-
-    Priority:
-    1. Try yfinance for equity/ETF/index symbols
-    2. Try ccxt for crypto symbols
-    3. Fallback to PriceSource (RSS/API) entries
-    """
+    """yfinance (indices/FX/gold) and ccxt (crypto) first, then configured PriceSource feeds."""
     stats = PriceFeedStats()
     now = timezone.now()
-
-    try:
-        _sync_from_yfinance(stats, now)
-    except Exception:
-        pass  # Graceful degradation
-
-    try:
-        _sync_from_ccxt(stats, now)
-    except Exception:
-        pass  # Graceful degradation
-
-    # Fallback: sync from configured RSS/API sources
+    for sync in (_sync_from_yfinance, _sync_from_ccxt):
+        try:
+            sync(stats, now)
+        except Exception as exc:
+            _record_error(stats, f"{sync.__name__}: {exc}")
     _sync_from_price_sources(stats, now, user_agent)
-
     return stats
 
 
-def _sync_from_yfinance(stats: PriceFeedStats, now: datetime) -> None:
-    """Fetch latest prices from yfinance for configured symbols."""
-    try:
-        import yfinance as yf
-    except ImportError:
-        return
+def _record_error(stats: PriceFeedStats, message: str) -> None:
+    logger.warning("price sync: %s", message)
+    stats.errors.append(message[:500])
 
-    symbols = list(
-        AssetSeries.objects.filter(symbol__isnull=False)
-        .exclude(symbol__in=["BTC-USD", "ETH-USD", "BTCUSDT"])
-        .values_list("symbol", flat=True)
-        .distinct()
+
+def _upsert_candle(series: AssetSeries, timestamp: datetime, open_: float, high: float, low: float, close: float, volume: float) -> None:
+    candle, created = AssetCandle.objects.get_or_create(
+        series=series,
+        timestamp=timestamp,
+        defaults={"open": open_, "high": high, "low": low, "close": close, "volume": volume},
     )
-    if not symbols:
+    if not created:
+        candle.high = max(candle.high, high)
+        candle.low = min(candle.low, low)
+        candle.close = close
+        candle.volume = max(candle.volume, volume)
+        candle.save(update_fields=["high", "low", "close", "volume"])
+
+
+def _yfinance_targets() -> dict[str, str]:
+    present = AssetSeries.objects.filter(symbol__in=list(YF_SYMBOLS)).values_list("symbol", flat=True)
+    return {symbol: YF_SYMBOLS[symbol] for symbol in present}
+
+
+def _sync_from_yfinance(stats: PriceFeedStats, now: datetime) -> None:
+    targets = _yfinance_targets()
+    if not targets:
         return
+    import yfinance as yf
 
-    stats.api_feeds_checked += len(symbols)
-    minute_ts = now.replace(second=0, microsecond=0)
-
-    try:
-        tickers = yf.Tickers(" ".join(symbols))
-    except Exception:
-        tickers = None
-
-    for symbol in symbols:
+    stats.api_feeds_checked += len(targets)
+    for symbol, ticker in targets.items():
         try:
-            series = AssetSeries.objects.filter(symbol=symbol).first()
-            if not series:
-                continue
-
-            ticker_obj = None
-            if tickers is not None:
-                try:
-                    ticker_obj = tickers.tickers.get(symbol) or tickers.tickers.get(symbol.upper())
-                except Exception:
-                    ticker_obj = None
-            if ticker_obj is None:
-                ticker_obj = yf.Ticker(symbol)
-
-            history = ticker_obj.history(period="1d", interval="1m")
+            history = yf.Ticker(ticker).history(period="1d", interval="1m")
             if history is None or history.empty:
                 continue
-
+            bar_time = history.index[-1].to_pydatetime().astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
             latest = history.iloc[-1]
             close = _as_float(latest.get("Close"))
-            open_price = _as_float(latest.get("Open"))
-            high = _as_float(latest.get("High"))
-            low = _as_float(latest.get("Low"))
-            volume = _as_float(latest.get("Volume"), default=0.0)
-
             if close is None or close <= 0:
                 continue
-
-            open_value = open_price if open_price is not None and open_price > 0 else close
-            high_value = high if high is not None and high > 0 else max(open_value, close)
-            low_value = low if low is not None and low > 0 else min(open_value, close)
-
-            candle, created = AssetCandle.objects.get_or_create(
-                series=series,
-                timestamp=minute_ts,
-                defaults={
-                    "open": open_value,
-                    "high": high_value,
-                    "low": low_value,
-                    "close": close,
-                    "volume": volume,
-                },
-            )
-            if not created:
-                candle.high = max(candle.high, high_value)
-                candle.low = min(candle.low, low_value)
-                candle.close = close
-                candle.volume = max(candle.volume, volume)
-                candle.save(update_fields=["high", "low", "close", "volume"])
+            open_value = _as_float(latest.get("Open")) or close
+            high = _as_float(latest.get("High")) or max(open_value, close)
+            low = _as_float(latest.get("Low")) or min(open_value, close)
+            volume = _as_float(latest.get("Volume"), default=0.0) or 0.0
+            _upsert_candle(AssetSeries.objects.get(symbol=symbol), bar_time, open_value, high, low, close, volume)
             stats.api_prices_recorded += 1
-        except Exception:
-            continue
+        except Exception as exc:
+            _record_error(stats, f"yfinance {ticker}: {exc}")
 
 
 def _sync_from_ccxt(stats: PriceFeedStats, now: datetime) -> None:
-    """Fetch latest prices from CCXT for crypto symbols."""
-    try:
-        import ccxt
-    except ImportError:
+    present = list(AssetSeries.objects.filter(symbol__in=list(CCXT_SYMBOLS)).values_list("symbol", flat=True))
+    if not present:
         return
+    import ccxt
 
-    symbols = [
-        s
-        for s in AssetSeries.objects.filter(
-            symbol__in=["BTC-USD", "ETH-USD", "BTCUSDT", "BTC/USD", "ETH/USD"]
-        ).values_list("symbol", flat=True)
-    ]
-    if not symbols:
-        return
-
-    try:
-        exchange = ccxt.binance()
-        stats.api_feeds_checked += len(symbols)
-        minute_ts = now.replace(second=0, microsecond=0)
-
-        for symbol in symbols:
-            try:
-                series = AssetSeries.objects.filter(symbol=symbol).first()
-                if not series:
-                    continue
-
-                exchange_symbol = symbol.replace("-", "/") if "-" in symbol else symbol
-                ohlcv = exchange.fetch_ohlcv(exchange_symbol, "1m", limit=1)
-                if not ohlcv:
-                    continue
-
-                candle_row = ohlcv[-1]
-                open_price, high, low, close, volume = candle_row[1:]
-
-                if close <= 0:
-                    continue
-
-                candle, created = AssetCandle.objects.get_or_create(
-                    series=series,
-                    timestamp=minute_ts,
-                    defaults={
-                        "open": open_price,
-                        "high": high,
-                        "low": low,
-                        "close": close,
-                        "volume": volume,
-                    },
-                )
-                if not created:
-                    candle.high = max(candle.high, high)
-                    candle.low = min(candle.low, low)
-                    candle.close = close
-                    candle.save(update_fields=["high", "low", "close"])
-                stats.api_prices_recorded += 1
-            except Exception:
-                pass
-    except Exception:
-        pass
+    exchange = ccxt.binance()
+    stats.api_feeds_checked += len(present)
+    for symbol in present:
+        market = CCXT_SYMBOLS[symbol]
+        try:
+            ohlcv = exchange.fetch_ohlcv(market, "1m", limit=1)
+            if not ohlcv:
+                continue
+            ts_ms, open_price, high, low, close, volume = ohlcv[-1][:6]
+            if not close or close <= 0:
+                continue
+            bar_time = datetime.fromtimestamp(ts_ms / 1000, tz=dt_timezone.utc)
+            _upsert_candle(AssetSeries.objects.get(symbol=symbol), bar_time, open_price, high, low, close, volume or 0.0)
+            stats.api_prices_recorded += 1
+        except Exception as exc:
+            _record_error(stats, f"ccxt {market}: {exc}")
 
 
 def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: str | None = None) -> None:
@@ -204,6 +135,11 @@ def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: s
     try:
         for source in sources:
             if source.backoff_until and source.backoff_until > now:
+                continue
+            # rate_limit_seconds is a minimum gap between fetches, not a sleep.
+            if source.last_fetched_at and source.rate_limit_seconds and (
+                now - source.last_fetched_at
+            ).total_seconds() < source.rate_limit_seconds:
                 continue
             stats.feeds_checked += 1
 
@@ -235,7 +171,7 @@ def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: s
                 )
             except Exception as exc:
                 _record_price_source_error(source, str(exc))
-            time.sleep(max(0.0, float(source.rate_limit_seconds or 0)))
+                _record_error(stats, f"{source.name}: {exc}")
     finally:
         client.close()
 
@@ -474,7 +410,7 @@ def _store_prices_from_items(
     for item in items:
         published_at = item.get("published_at")
         if isinstance(published_at, datetime):
-            minute_ts = published_at.astimezone(timezone.utc).replace(second=0, microsecond=0)
+            minute_ts = published_at.astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
         else:
             minute_ts = now.replace(second=0, microsecond=0)
 
@@ -515,23 +451,7 @@ def _store_prices_from_items(
             low = low * scale
             close = close * scale
 
-        candle, created = AssetCandle.objects.get_or_create(
-            series=series,
-            timestamp=minute_ts,
-            defaults={
-                "open": open_price,
-                "high": high,
-                "low": low,
-                "close": close,
-                "volume": volume,
-            },
-        )
-        if not created:
-            candle.high = max(candle.high, high)
-            candle.low = min(candle.low, low)
-            candle.close = close
-            candle.volume = max(candle.volume, volume)
-            candle.save(update_fields=["high", "low", "close", "volume"])
+        _upsert_candle(series, minute_ts, open_price, high, low, close, volume)
         recorded += 1
 
     return recorded
@@ -566,7 +486,7 @@ def _parse_datetime(value: object) -> datetime | None:
     except Exception:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt = dt.replace(tzinfo=dt_timezone.utc)
     return dt
 
 
@@ -579,7 +499,7 @@ def _parse_provider_timestamp(value: object) -> datetime | None:
         if ts > 1e12:
             ts = ts / 1000.0
         try:
-            return datetime.fromtimestamp(ts, tz=timezone.utc)
+            return datetime.fromtimestamp(ts, tz=dt_timezone.utc)
         except Exception:
             return None
 
@@ -588,7 +508,7 @@ def _parse_provider_timestamp(value: object) -> datetime | None:
         return None
     if re.fullmatch(r"\d{8}T\d{6}", text):
         try:
-            return datetime.strptime(text, "%Y%m%dT%H%M%S").replace(tzinfo=timezone.utc)
+            return datetime.strptime(text, "%Y%m%dT%H%M%S").replace(tzinfo=dt_timezone.utc)
         except ValueError:
             return None
     return _parse_datetime(text)

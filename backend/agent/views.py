@@ -10,17 +10,17 @@ from rest_framework.views import APIView
 
 from agent.control_auth import control_password_configured, issue_control_token, verify_control_password
 from agent.models import AgentLogEvent, AgentRun
-from agent.permissions import HasAgentControlToken
+from agent.permissions import ControlLoginThrottle, HasAgentControlToken
 from agent.serializers import AgentConfigSerializer, AgentControlLoginSerializer, AgentLogEventSerializer
 from agent.services import (
     agent_live_status,
     get_config,
-    pause_run_forever,
-    resume_run_forever,
-    run_forever_status,
-    start_agent_async,
-    start_run_forever_async,
-    stop_run_forever,
+    request_pause,
+    request_resume,
+    request_run_once,
+    request_start,
+    request_stop,
+    worker_status,
 )
 
 
@@ -85,58 +85,6 @@ class AgentProtectedView(APIView):
     permission_classes = [HasAgentControlToken]
 
 
-class AgentStatusView(AgentProtectedView):
-    def get(self, request):
-        payload = agent_live_status()
-        payload["run_forever"] = run_forever_status()
-        return Response(payload)
-
-
-class AgentRunView(AgentProtectedView):
-    def post(self, request):
-        started = start_agent_async()
-        if not started:
-            return Response({"status": "already_running"}, status=status.HTTP_409_CONFLICT)
-        return Response({"status": "started"}, status=status.HTTP_202_ACCEPTED)
-
-
-class AgentRunForeverView(AgentProtectedView):
-    def post(self, request):
-        started = start_run_forever_async()
-        if not started:
-            return Response({"status": "already_running"}, status=status.HTTP_409_CONFLICT)
-        return Response({"status": "started"}, status=status.HTTP_202_ACCEPTED)
-
-
-class AgentRunForeverStatusView(AgentProtectedView):
-    def get(self, request):
-        return Response(run_forever_status())
-
-
-class AgentRunForeverPauseView(AgentProtectedView):
-    def post(self, request):
-        paused = pause_run_forever()
-        if not paused:
-            return Response({"status": "not_running"}, status=status.HTTP_409_CONFLICT)
-        return Response({"status": "paused"})
-
-
-class AgentRunForeverResumeView(AgentProtectedView):
-    def post(self, request):
-        resumed = resume_run_forever()
-        if not resumed:
-            return Response({"status": "not_running"}, status=status.HTTP_409_CONFLICT)
-        return Response({"status": "resumed"})
-
-
-class AgentRunForeverStopView(AgentProtectedView):
-    def post(self, request):
-        stopped = stop_run_forever()
-        if not stopped:
-            return Response({"status": "not_running"}, status=status.HTTP_409_CONFLICT)
-        return Response({"status": "stopping"})
-
-
 class AgentConfigView(AgentProtectedView):
     def get(self, request):
         config = get_config()
@@ -168,6 +116,7 @@ class AgentLogsView(AgentProtectedView):
 class AgentControlLoginView(APIView):
     authentication_classes = []
     permission_classes = []
+    throttle_classes = [ControlLoginThrottle]
 
     def post(self, request):
         serializer = AgentControlLoginSerializer(data=request.data)
@@ -207,15 +156,17 @@ class AgentControlBaseView(APIView):
     permission_classes = [HasAgentControlToken]
 
 
+def _state() -> dict:
+    return {
+        "agent": agent_live_status(),
+        "run_forever": worker_status(),
+        "server_time": timezone.now(),
+    }
+
+
 class AgentControlStateView(AgentControlBaseView):
     def get(self, request):
-        return Response(
-            {
-                "agent": agent_live_status(),
-                "run_forever": run_forever_status(),
-                "server_time": timezone.now(),
-            }
-        )
+        return Response(_state())
 
 
 class AgentControlStatsView(AgentControlBaseView):
@@ -248,70 +199,49 @@ class AgentControlDashboardView(AgentControlBaseView):
         hours = _int_param(request.query_params.get("hours", "24"), default=24, min_value=1, max_value=168)
         limit = _int_param(request.query_params.get("limit", "100"), default=100, min_value=1, max_value=300)
         logs = AgentLogEvent.objects.order_by("-created_at")[:limit]
-
         return Response(
             {
-                "state": {
-                    "agent": agent_live_status(),
-                    "run_forever": run_forever_status(),
-                    "server_time": timezone.now(),
-                },
+                "state": _state(),
                 "stats": _build_stats(hours),
                 "logs": AgentLogEventSerializer(logs, many=True).data,
             }
         )
 
 
-class AgentControlStartView(AgentControlBaseView):
+class _ControlActionView(AgentControlBaseView):
+    """POST writes a control flag; the worker container picks it up within ~1s."""
+
+    action = None
+    status_label = ""
+
     def post(self, request):
-        started = start_run_forever_async()
-        if not started:
-            return Response(
-                {"status": "already_running", "state": run_forever_status()},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response({"status": "started", "state": run_forever_status()}, status=status.HTTP_202_ACCEPTED)
+        state = type(self).action()
+        return Response(
+            {"status": self.status_label, "state": state, "agent": agent_live_status()},
+            status=status.HTTP_202_ACCEPTED,
+        )
 
 
-class AgentControlRunOnceView(AgentControlBaseView):
-    def post(self, request):
-        started = start_agent_async()
-        if not started:
-            return Response(
-                {"status": "already_running", "agent": agent_live_status()},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response({"status": "started", "agent": agent_live_status()}, status=status.HTTP_202_ACCEPTED)
+class AgentControlStartView(_ControlActionView):
+    action = staticmethod(request_start)
+    status_label = "start_requested"
 
 
-class AgentControlPauseView(AgentControlBaseView):
-    def post(self, request):
-        paused = pause_run_forever()
-        if not paused:
-            return Response(
-                {"status": "not_running", "state": run_forever_status()},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response({"status": "paused", "state": run_forever_status()})
+class AgentControlRunOnceView(_ControlActionView):
+    action = staticmethod(request_run_once)
+    status_label = "run_once_requested"
 
 
-class AgentControlResumeView(AgentControlBaseView):
-    def post(self, request):
-        resumed = resume_run_forever()
-        if not resumed:
-            return Response(
-                {"status": "not_running", "state": run_forever_status()},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response({"status": "resumed", "state": run_forever_status()})
+class AgentControlPauseView(_ControlActionView):
+    action = staticmethod(request_pause)
+    status_label = "pause_requested"
 
 
-class AgentControlStopView(AgentControlBaseView):
-    def post(self, request):
-        stopped = stop_run_forever()
-        if not stopped:
-            return Response(
-                {"status": "not_running", "state": run_forever_status()},
-                status=status.HTTP_409_CONFLICT,
-            )
-        return Response({"status": "stopping", "state": run_forever_status()})
+class AgentControlResumeView(_ControlActionView):
+    action = staticmethod(request_resume)
+    status_label = "resume_requested"
+
+
+class AgentControlStopView(_ControlActionView):
+    action = staticmethod(request_stop)
+    status_label = "stop_requested"

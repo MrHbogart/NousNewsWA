@@ -1,10 +1,9 @@
 from rest_framework import serializers
 from bs4 import BeautifulSoup
 
-from agent.models import PriceSource
 from articles.models import CardArticle
 from articles.slugging import build_article_slug
-from articles.services import aggregate_candles, resolve_timeframe
+from articles.services import aggregate_candles, enabled_price_source_labels, resolve_timeframe
 
 
 def _sanitize_article_text(value: str, *, keep_paragraphs: bool = False) -> str:
@@ -29,39 +28,27 @@ def _sanitize_article_text(value: str, *, keep_paragraphs: bool = False) -> str:
 
 class PriceSeriesMixin:
     def _enabled_price_source_symbol_labels(self) -> dict[str, str]:
-        cache_key = "_enabled_price_source_symbol_labels"
-        cached = self.context.get(cache_key)
-        if cached is not None:
-            return cached
+        # One query per serializer tree (list views share the context dict).
+        if "_price_labels" not in self.context:
+            self.context["_price_labels"] = enabled_price_source_labels()
+        return self.context["_price_labels"]
 
-        rows = (
-            PriceSource.objects.filter(enabled=True)
-            .exclude(symbol__exact="")
-            .order_by("symbol", "name", "id")
-            .values("symbol", "chart_label", "name")
-        )
-        symbol_labels: dict[str, str] = {}
-        explicit_labels: dict[str, bool] = {}
-        for row in rows:
-            symbol = (row.get("symbol") or "").strip()
-            if not symbol:
-                continue
-            chart_label = (row.get("chart_label") or "").strip()
-            explicit = bool(chart_label)
-            label = chart_label or (row.get("name") or "").strip() or symbol
-            if symbol not in symbol_labels:
-                symbol_labels[symbol] = label
-                explicit_labels[symbol] = explicit
-                continue
-            if explicit and not explicit_labels.get(symbol, False):
-                symbol_labels[symbol] = label
-                explicit_labels[symbol] = True
-
-        self.context[cache_key] = symbol_labels
-        return symbol_labels
-
-    def _serialize_price_series(self, card, include_detail: bool = False) -> list[dict]:
+    def _serialize_price_series(
+        self,
+        card,
+        include_detail: bool = False,
+        *,
+        window_start=None,
+        window_end=None,
+    ) -> list[dict]:
         interval_minutes, max_buckets, timeframe_label = resolve_timeframe(card.timeframe)
+        start = window_start or card.period_start
+        end = window_end or card.period_end
+        if window_start is not None or window_end is not None:
+            # Custom window (e.g. an aftermath article's post-brief period) is sized
+            # independently of the card's own timeframe bucket count.
+            span_minutes = max(0, (end - start).total_seconds() / 60)
+            max_buckets = max(1, int(-(-span_minutes // max(1, interval_minutes))))  # ceil div
         enabled_symbol_labels = self._enabled_price_source_symbol_labels()
         if not enabled_symbol_labels:
             return []
@@ -74,8 +61,8 @@ class PriceSeriesMixin:
 
             candles = aggregate_candles(
                 series=asset.series,
-                start=card.period_start,
-                end=card.period_end,
+                start=start,
+                end=end,
                 interval_minutes=interval_minutes,
                 max_buckets=max_buckets,
             )
@@ -180,6 +167,7 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
     price_series = serializers.SerializerMethodField()
     related_articles = serializers.SerializerMethodField()
     article_content = serializers.SerializerMethodField()
+    aftermath = serializers.SerializerMethodField()
 
     class Meta:
         model = CardArticle
@@ -204,6 +192,7 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
             "is_daily_summary",
             "price_series",
             "related_articles",
+            "aftermath",
             "created_at",
             "updated_at",
         ]
@@ -230,7 +219,26 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
         )
 
     def get_price_series(self, obj):
+        if obj.kind == CardArticle.KIND_AFTERMATH and obj.aftermath_price_until:
+            return self._serialize_price_series(
+                obj.card,
+                include_detail=True,
+                window_start=obj.card.period_end,
+                window_end=obj.aftermath_price_until,
+            )
         return self._serialize_price_series(obj.card, include_detail=True)
+
+    def get_aftermath(self, obj):
+        if obj.kind != CardArticle.KIND_MAIN:
+            return None
+        aftermath = obj.card.articles.filter(kind=CardArticle.KIND_AFTERMATH).values("uuid", "slug", "title").first()
+        if not aftermath:
+            return None
+        return {
+            "uuid": aftermath["uuid"],
+            "slug": aftermath["slug"],
+            "title": aftermath["title"],
+        }
 
     def get_related_articles(self, obj):
         related_qs = (

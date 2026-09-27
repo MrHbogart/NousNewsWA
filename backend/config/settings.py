@@ -1,18 +1,28 @@
 import os
 from pathlib import Path
 
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
-SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "replace-me-in-production")
 DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY or SECRET_KEY in {"change-me", "replace-me-in-production"}:
+    if not DEBUG:
+        raise ImproperlyConfigured("Set DJANGO_SECRET_KEY (see passgen.py) before running with DJANGO_DEBUG=false.")
+    SECRET_KEY = "insecure-dev-only-key"
 
+# DJANGO_INTERNAL_HOSTS: in-network names (set by docker-compose) so Nuxt SSR
+# (http://backend:8000) and the container healthcheck work whatever public
+# hosts DJANGO_ALLOWED_HOSTS lists.
 ALLOWED_HOSTS = [
     host.strip()
-    for host in os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+    for host in (
+        os.getenv("DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1") + "," + os.getenv("DJANGO_INTERNAL_HOSTS", "")
+    ).split(",")
     if host.strip()
 ]
 
@@ -30,7 +40,6 @@ INSTALLED_APPS = [
     "dataset.apps.DatasetConfig",
     "agent.apps.AgentConfig",
     "prices.apps.PricesConfig",
-    "cards.apps.CardsConfig",
 ]
 
 MIDDLEWARE = [
@@ -102,6 +111,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
     ],
+    "DEFAULT_THROTTLE_RATES": {
+        "agent_control_login": "5/min",
+    },
 }
 
 CORS_ALLOWED_ORIGINS = [
@@ -149,7 +161,6 @@ AGENT_SOURCE_FETCH_WORKERS = int(os.getenv("AGENT_SOURCE_FETCH_WORKERS", "8"))
 AGENT_LOG_MAX_CHARS = int(
     os.getenv("AGENT_LOG_MAX_CHARS", os.getenv("CRAWLER_LOG_MAX_CHARS", "200000"))
 )
-AGENT_LLM_MAX_REQUESTS_PER_RUN = int(os.getenv("AGENT_LLM_MAX_REQUESTS_PER_RUN", "2"))
 AGENT_LLM_RESERVED_FOR_ARTICLES = int(os.getenv("AGENT_LLM_RESERVED_FOR_ARTICLES", "2"))
 AGENT_ENABLE_ECONOMIST_AGENT = os.getenv("AGENT_ENABLE_ECONOMIST_AGENT", "false").strip().lower() in {
     "1",
@@ -157,3 +168,7 @@ AGENT_ENABLE_ECONOMIST_AGENT = os.getenv("AGENT_ENABLE_ECONOMIST_AGENT", "false"
     "yes",
     "on",
 }
+
+AGENT_LOG_RETENTION_DAYS = int(os.getenv("AGENT_LOG_RETENTION_DAYS", "14"))
+RAW_NEWS_RETENTION_DAYS = int(os.getenv("RAW_NEWS_RETENTION_DAYS", "60"))
+CANDLE_RETENTION_DAYS = int(os.getenv("CANDLE_RETENTION_DAYS", "180"))

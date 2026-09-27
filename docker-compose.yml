@@ -4,15 +4,18 @@ services:
     image: postgres:15-alpine
     restart: unless-stopped
     env_file:
-      - ./backend/.env
+      - .env
     environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nousnews}
+      POSTGRES_USER: ${POSTGRES_USER:-nousnews}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nousnews}
       PGDATA: /var/lib/postgresql/data/pgdata
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - nousnews_postgres_data:/var/lib/postgresql/data
     networks:
       - nousnews_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER:-postgres}\" -d \"$${POSTGRES_DB:-postgres}\""]
+      test: ["CMD-SHELL", "pg_isready -U \"${POSTGRES_USER:-nousnews}\" -d \"${POSTGRES_DB:-nousnews}\""]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -20,22 +23,29 @@ services:
 
   backend:
     container_name: nousnews-backend
+    platform: ${DOCKER_PLATFORM:-}
     build:
       context: ./backend
       dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}
     restart: unless-stopped
     env_file:
-      - ./backend/.env
+      - .env
     environment:
+      DJANGO_INTERNAL_HOSTS: backend,127.0.0.1,localhost
       DJANGO_DB_HOST: db
+      DJANGO_DB_PORT: 5432
+      DJANGO_DB_NAME: ${POSTGRES_DB:-nousnews}
+      DJANGO_DB_USER: ${POSTGRES_USER:-nousnews}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:-nousnews}
     depends_on:
       db:
         condition: service_healthy
     ports:
-      - "8081:8000"
+      - "${BACKEND_HOST_PORT:-8081}:8000"
     volumes:
-      - backend_static:/app/staticfiles
-      - backend_media:/app/media
+      - nousnews_backend_static:/app/staticfiles
     networks:
       - nousnews_network
     healthcheck:
@@ -49,21 +59,51 @@ services:
       retries: 5
       start_period: 20s
 
+  agent:
+    container_name: nousnews-agent
+    platform: ${DOCKER_PLATFORM:-}
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+      args:
+        PYTHON_BASE_IMAGE: ${PYTHON_BASE_IMAGE:-python:3.12-slim}
+    restart: unless-stopped
+    command: ["python", "manage.py", "run_forever"]
+    env_file:
+      - .env
+    environment:
+      SKIP_SETUP: "true"
+      DJANGO_DB_HOST: db
+      DJANGO_DB_PORT: 5432
+      DJANGO_DB_NAME: ${POSTGRES_DB:-nousnews}
+      DJANGO_DB_USER: ${POSTGRES_USER:-nousnews}
+      DJANGO_DB_PASSWORD: ${POSTGRES_PASSWORD:-nousnews}
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - nousnews_network
+
   frontend:
     container_name: nousnews-frontend
+    platform: ${DOCKER_PLATFORM:-}
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        NODE_BASE_IMAGE: ${NODE_BASE_IMAGE:-node:20-alpine}
     restart: unless-stopped
     env_file:
-      - ./frontend/.env
+      - .env
     environment:
-      NUXT_INTERNAL_API_BASE_URL: http://backend:8000/api
+      NUXT_API_BASE_URL: http://backend:8000/api
+      NUXT_PUBLIC_API_BASE_URL: ${NUXT_PUBLIC_API_BASE_URL:-http://127.0.0.1:8081/api}
+      NUXT_PUBLIC_SITE_DOMAIN: ${NUXT_PUBLIC_SITE_DOMAIN:-http://127.0.0.1:3001}
     depends_on:
       backend:
         condition: service_healthy
     ports:
-      - "3001:3001"
+      - "${FRONTEND_HOST_PORT:-3001}:3001"
     networks:
       - nousnews_network
     healthcheck:
@@ -78,6 +118,5 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
-  backend_static:
-  backend_media:
+  nousnews_postgres_data:
+  nousnews_backend_static:

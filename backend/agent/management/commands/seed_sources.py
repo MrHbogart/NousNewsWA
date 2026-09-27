@@ -151,41 +151,7 @@ NEWS_API_SOURCES = [
 ]
 
 
-LEGACY_NEWS_API_SOURCES = [
-    {"name": "NewsDataHub", "base_url": "https://api.newsdatahub.com/v1/news", "source_type": NewsSource.SOURCE_API, "enabled": False},
-    {"name": "NewsAPI Everything", "base_url": "https://newsapi.org/v2/everything", "source_type": NewsSource.SOURCE_API, "enabled": False, "api_key_param": "apiKey"},
-    {"name": "NewsAPI Top Headlines", "base_url": "https://newsapi.org/v2/top-headlines", "source_type": NewsSource.SOURCE_API, "enabled": False, "api_key_param": "apiKey"},
-    {"name": "NewsData.io", "base_url": "https://newsdata.io/api/1/news", "source_type": NewsSource.SOURCE_API, "enabled": False},
-    {"name": "Mediastack", "base_url": "https://api.mediastack.com/v1/news", "source_type": NewsSource.SOURCE_API, "enabled": False},
-    {"name": "Bing News Search", "base_url": "https://api.bing.microsoft.com/v7.0/news/search", "source_type": NewsSource.SOURCE_API, "enabled": False},
-    {"name": "TheNewsAPI", "base_url": "https://www.thenewsapi.com/", "source_type": NewsSource.SOURCE_API, "enabled": False},
-    {"name": "AllNewsAPI", "base_url": "https://api.allnewsapi.com/search", "source_type": NewsSource.SOURCE_API, "enabled": False},
-]
-
-
-LEGACY_NEWS_RSS_SOURCES = [
-    {"name": "CNN", "base_url": "http://rss.cnn.com/rss/edition.rss", "enabled": True},
-    {"name": "NYTimes", "base_url": "https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml", "enabled": True},
-    {"name": "BBC World", "base_url": "https://feeds.bbci.co.uk/news/world/rss.xml", "enabled": True},
-    {"name": "Washington Post World", "base_url": "https://feeds.washingtonpost.com/rss/world", "enabled": True},
-    {"name": "NBC News", "base_url": "https://feeds.nbcnews.com/feeds/topstories", "enabled": True},
-    {"name": "Fox News", "base_url": "https://feeds.foxnews.com/foxnews/latest", "enabled": True},
-    {"name": "Al Jazeera", "base_url": "https://www.aljazeera.com/xml/rss/all.xml", "enabled": True},
-    {"name": "Times of India", "base_url": "https://timesofindia.indiatimes.com/rssfeedstopstories.cms", "enabled": True},
-    {"name": "Le Monde", "base_url": "https://www.lemonde.fr/en/rss/une.xml", "enabled": True},
-    {"name": "Lenta", "base_url": "https://lenta.ru/rss", "enabled": True},
-    {"name": "Gazeta", "base_url": "https://www.gazeta.ru/export/rss/first.xml", "enabled": True},
-    {"name": "Newsru", "base_url": "https://rss.newsru.com/top/big/", "enabled": True},
-    {"name": "RT", "base_url": "https://www.rt.com/rss/", "enabled": True},
-    {"name": "Meduza", "base_url": "https://meduza.io/rss/all", "enabled": True},
-]
-
-
 ASSET_SERIES = [
-    {"symbol": "USDidx", "label": "USD Index (Legacy)", "timeframe": "1m"},
-    {"symbol": "XAUUSD", "label": "Gold Spot (Legacy)", "timeframe": "1m"},
-    {"symbol": "BTCUSD", "label": "Bitcoin (Legacy)", "timeframe": "1m"},
-    {"symbol": "S&P500", "label": "S&P 500 (Legacy)", "timeframe": "1m"},
     {"symbol": "DX-Y.NYB", "label": "US Dollar Index (DXY)", "timeframe": "1m"},
     {"symbol": "XAUUSD=X", "label": "Gold Spot (XAUUSD)", "timeframe": "1m"},
     {"symbol": "BTC-USD", "label": "Bitcoin (BTCUSD)", "timeframe": "1m"},
@@ -335,42 +301,6 @@ PRICE_SOURCES = [
 ]
 
 
-LEGACY_PRICE_SOURCES = [
-    {
-        "name": "USD Index (fixture)",
-        "base_url": "fixtures/USDidx.csv",
-        "symbol": "USDidx",
-        "chart_label": "USD Index",
-        "source_type": PriceSource.SOURCE_RSS,
-        "enabled": False,
-    },
-    {
-        "name": "XAUUSD (fixture)",
-        "base_url": "fixtures/XAUUSD.csv",
-        "symbol": "XAUUSD",
-        "chart_label": "Gold",
-        "source_type": PriceSource.SOURCE_RSS,
-        "enabled": False,
-    },
-    {
-        "name": "BTCUSD (fixture)",
-        "base_url": "fixtures/BTCUSD.csv",
-        "symbol": "BTCUSD",
-        "chart_label": "Bitcoin",
-        "source_type": PriceSource.SOURCE_RSS,
-        "enabled": False,
-    },
-    {
-        "name": "S&P500 (fixture)",
-        "base_url": "fixtures/SP500.csv",
-        "symbol": "S&P500",
-        "chart_label": "S&P 500",
-        "source_type": PriceSource.SOURCE_RSS,
-        "enabled": False,
-    },
-]
-
-
 class Command(BaseCommand):
     help = "Seed curated central-bank news sources and diversified price provider templates."
 
@@ -382,9 +312,7 @@ class Command(BaseCommand):
 
         for definition in [
             *NEWS_RSS_SOURCES,
-            *LEGACY_NEWS_RSS_SOURCES,
             *NEWS_API_SOURCES,
-            *LEGACY_NEWS_API_SOURCES,
         ]:
             source, was_created = NewsSource.objects.get_or_create(
                 base_url=definition["base_url"],
@@ -410,7 +338,7 @@ class Command(BaseCommand):
             if updates:
                 series.save(update_fields=updates)
 
-        for definition in [*PRICE_SOURCES, *LEGACY_PRICE_SOURCES]:
+        for definition in PRICE_SOURCES:
             source, was_created = PriceSource.objects.get_or_create(
                 name=definition["name"],
                 symbol=definition["symbol"],
@@ -421,10 +349,9 @@ class Command(BaseCommand):
             if self._apply_missing_price_fields(source, definition):
                 updated_prices += 1
 
-        # Disable legacy fixture URLs so production loops do not retry local CSV paths.
-        PriceSource.objects.filter(base_url__startswith="fixtures/").update(enabled=False)
-
-        config, _ = AgentConfig.objects.get_or_create()
+        # Defaults only for a fresh config: this runs on every container start
+        # and must never overwrite what an admin changed.
+        config, config_created = AgentConfig.objects.get_or_create()
         config_updates = {
             "llm_base_url": "https://openrouter.ai/api/v1",
             "llm_max_output_tokens": 20000,
@@ -433,7 +360,7 @@ class Command(BaseCommand):
             "max_items_per_source": 100,
             "max_context_chars": 50000,
         }
-        if config_updates:
+        if config_created:
             for key, value in config_updates.items():
                 setattr(config, key, value)
             config.save(update_fields=list(config_updates.keys()))

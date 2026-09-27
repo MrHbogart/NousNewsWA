@@ -1,4 +1,6 @@
-FROM node:20-alpine AS builder
+ARG NODE_BASE_IMAGE=node:20-alpine
+
+FROM ${NODE_BASE_IMAGE} AS builder
 
 WORKDIR /app
 
@@ -9,15 +11,39 @@ ENV NITRO_PORT=3001
 ENV NITRO_HOST=0.0.0.0
 ENV NUXT_TELEMETRY_DISABLED=1
 
-COPY package.json .
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev --no-audit --no-fund
 
-RUN npm install --include=dev --no-audit --no-fund
+COPY . .
+RUN npm run build
+
+# ---------- DEVELOPMENT ----------
+# Used by docker-compose.dev.yml (build.target: development) for hot reload.
+# The dev overlay bind-mounts ./frontend over /app and keeps this stage's
+# node_modules via an anonymous volume, so `npm install` here is what
+# actually provides dependencies inside the running container.
+
+FROM ${NODE_BASE_IMAGE} AS development
+
+WORKDIR /app
+
+ENV NODE_ENV=development
+ENV NITRO_HOST=0.0.0.0
+ENV NITRO_PORT=3001
+ENV NUXT_TELEMETRY_DISABLED=1
+
+COPY package.json package-lock.json ./
+RUN npm ci --include=dev --no-audit --no-fund
 
 COPY . .
 
-RUN npm run build
+EXPOSE 3001
 
-FROM node:20-alpine AS runner
+CMD ["npm", "run", "dev"]
+
+# ---------- RUNNER ----------
+
+FROM ${NODE_BASE_IMAGE} AS runner
 
 WORKDIR /app
 
@@ -33,9 +59,8 @@ COPY --from=builder /app/public ./public
 
 EXPOSE 3001
 
-RUN apk add --no-cache curl ca-certificates
-
-RUN chown -R node:node /app || true
+RUN apk add --no-cache curl ca-certificates && \
+    chown -R node:node /app || true
 
 USER node
 

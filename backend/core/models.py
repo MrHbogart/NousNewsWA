@@ -7,10 +7,3 @@ class TimeStampedModel(models.Model):
 
     class Meta:
         abstract = True
-
-
-class PublishableModel(TimeStampedModel):
-    is_public = models.BooleanField(default=True)
-
-    class Meta:
-        abstract = True

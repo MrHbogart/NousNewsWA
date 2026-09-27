@@ -5,7 +5,7 @@ export const useAgentControlApi = () => {
   const request = (path, { method = 'GET', token = '', body, query } = {}) => {
     const headers = {}
     if (token) headers.Authorization = `Bearer ${token}`
-    return $fetch(`${baseUrl}${path}`, { method, headers, body, query })
+    return $fetch(`${baseUrl}${path}`, { method, headers, body, query, timeout: 10000 })
   }
 
   const login = (password) =>

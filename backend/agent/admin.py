@@ -12,7 +12,7 @@ from .models import (
     NewsSource,
     PriceSource,
 )
-from .services import start_run_forever_async
+from .services import request_start
 
 
 class AgentConfigAdminForm(forms.ModelForm):
@@ -83,6 +83,7 @@ class AgentConfigAdmin(admin.ModelAdmin):
         ("Runtime", {
             "fields": (
                 "run_forever_enabled",
+                "run_forever_paused",
                 "loop_interval_minutes",
                 "price_loop_interval_seconds",
             )
@@ -100,6 +101,16 @@ class AgentConfigAdmin(admin.ModelAdmin):
                 "filter_prompt_template",
                 "signals_prompt_template",
                 "writing_prompt_template",
+                "aftermath_prompt_template",
+            )
+        }),
+        ("Aftermath Articles", {
+            "fields": (
+                "aftermath_min_importance_score",
+                "aftermath_delay_hour_minutes",
+                "aftermath_delay_day_minutes",
+                "aftermath_delay_week_minutes",
+                "aftermath_delay_month_minutes",
             )
         }),
         ("Memory", {
@@ -125,21 +136,15 @@ class AgentConfigAdmin(admin.ModelAdmin):
         return "not set"
 
     def start_run_forever_loop(self, request, queryset):
-        started = start_run_forever_async()
-        if started:
-            self.message_user(request, "run_forever loop started.", level=messages.SUCCESS)
-        else:
-            self.message_user(request, "run_forever loop is already running.", level=messages.WARNING)
+        request_start()
+        self.message_user(request, "Worker loop enabled; the agent container picks it up within seconds.", level=messages.SUCCESS)
 
     start_run_forever_loop.short_description = "Start run_forever loop"
 
     def response_change(self, request, obj):
         if "_start_run_forever" in request.POST:
-            started = start_run_forever_async()
-            if started:
-                self.message_user(request, "run_forever loop started.", level=messages.SUCCESS)
-            else:
-                self.message_user(request, "run_forever loop is already running.", level=messages.WARNING)
+            request_start()
+            self.message_user(request, "Worker loop enabled; the agent container picks it up within seconds.", level=messages.SUCCESS)
             return self.response_post_save_change(request, obj)
         return super().response_change(request, obj)
 
@@ -153,7 +158,6 @@ class AgentRunAdmin(admin.ModelAdmin):
         "pages_processed",
         "articles_created",
         "use_llm_filtering",
-        "objective",
     )
     list_filter = ("status",)
     ordering = ("-started_at",)

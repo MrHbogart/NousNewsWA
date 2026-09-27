@@ -14,19 +14,21 @@ Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and 
 
 ```
 NousNews/
-├── backend/               # Django backend
-├── frontend/              # Nuxt 3 frontend
-├── docker-compose.yml     # Full-stack Docker Compose
-└── passgen.py             # Helper for generating secrets
+├── backend/                   # Django backend
+├── frontend/                  # Nuxt 3 frontend
+├── claude/                    # Claude Code project docs (start at claude/CLAUDE.md)
+├── docker-compose.yml         # Full-stack Docker Compose
+├── docker-compose.dev.yml     # Dev overlay: bind mounts, hot reload
+├── .env.example                # Env template (copy to .env)
+└── passgen.py                  # Helper for generating secrets
 ```
 
 ## Quick start (Docker)
 
-1) Configure backend and frontend env files:
+1) Configure the environment file:
 
 ```bash
-cp .env.example backend/.env
-cp .env.example frontend/.env
+cp .env.example .env
 ```
 
 2) Start the full stack:
@@ -35,9 +37,18 @@ cp .env.example frontend/.env
 docker compose up --build
 ```
 
+For local development with hot reload and bind-mounted source, layer the dev
+overlay:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up --build
+```
+
 Services:
 - Frontend: http://127.0.0.1:3001
 - Backend API: http://127.0.0.1:8081/api
+- Agent worker: `agent` container (no port; controlled from `/agent-control`
+  or Django admin)
 
 Optional: create a Django superuser in Docker by setting these in `backend/.env`:
 
@@ -58,7 +69,9 @@ source .venv/bin/activate
 pip install -r requirements.txt
 cp ../.env.example .env
 python manage.py migrate
-python manage.py runserver
+python manage.py seed_sources
+uvicorn config.asgi:application --reload   # runserver can't stream SSE
+python manage.py run_forever                # agent worker, in a second shell
 ```
 
 The API will be available at http://127.0.0.1:8000/api
@@ -92,18 +105,20 @@ npm run dev
 
 ## Environment variables
 
-Backend (`backend/.env`):
-- `DJANGO_SECRET_KEY`
-- `DJANGO_DEBUG`
-- `DJANGO_ALLOWED_HOSTS`
-- `DJANGO_DB_*`
-- `DJANGO_CORS_ALLOWED_ORIGINS`
-- `DJANGO_CSRF_TRUSTED_ORIGINS`
-- `DJANGO_SUPERUSER_*` (optional)
+See `.env.example` for the full list with defaults and comments. In Docker,
+one root `.env` feeds every service; `POSTGRES_*` is the source of truth for
+the database and is mapped into `DJANGO_DB_*` for the backend by
+`docker-compose.yml`. For bare-metal local dev, copy `.env.example` into
+`backend/.env` and `frontend/.env` instead (each app's `.env` loader only
+reads its own directory).
 
-Frontend (`frontend/.env`):
-- `NUXT_PUBLIC_API_BASE_URL`
-- `NUXT_PUBLIC_SITE_DOMAIN`
+Key groups:
+- `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`
+- `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`
+- `DJANGO_CORS_ALLOWED_ORIGINS`, `DJANGO_CSRF_TRUSTED_ORIGINS`
+- `DJANGO_SUPERUSER_*` (optional — leave `DJANGO_SUPERUSER_USERNAME`/
+  `_PASSWORD` blank to skip creating an admin account)
+- `NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_SITE_DOMAIN`
 
 You can generate secure secrets with:
 
@@ -113,38 +128,64 @@ python passgen.py
 
 ## API endpoints
 
-Base URL: `/api`
+Base URL: `/api` (see `backend/config/urls.py` for the top-level include list).
 
-Articles and briefs:
+Articles and briefs (`backend/articles/urls.py`):
+- `GET /health/` — always 200 while the API is up; `agent` reports whether
+  the worker is alive and when it last ran news/price syncs
+- `GET /lasthour/`
+- `GET /briefs/?page=0&limit=10` — final briefs of every timeframe, newest
+  period end first
+- `GET /articles/{uuid-or-slug}/`
+
+Live updates (Server-Sent Events, `backend/articles/stream.py`):
+- `GET /stream/home/` — `event: home` with `{lasthour, briefs}` on connect
+  and whenever content changes; `: ping` every 15s
+- `GET /stream/articles/{uuid-or-slug}/` — `event: article` on connect and
+  on change
+
+Agent (`backend/agent/urls.py`; all need a control token from
+`POST /agent/control/login/`, sent as `Authorization: Bearer <token>`):
+- `GET|PUT /agent/config/` (`llm_base_url` is read-only here; set it in
+  Django admin)
+- `GET /agent/logs/`
+- `GET /agent/control/state/`, `/stats/`, `/logs/`, `/dashboard/`
+- `POST /agent/control/start/`, `/run-once/`, `/pause/`, `/resume/`,
+  `/stop/` — these only set flags; the `agent` worker container applies
+  them within about a second
+
+Prices (`backend/prices/urls.py`, mounted at `/api/prices/`):
 - `GET /health/`
-- `GET /articles/`
-- `POST /articles/ingest/`
-- `GET /articles/summary/?limit=5`
-- `GET /briefs/`
-- `GET /briefs/current/`
-- `GET /briefs/headlines/?limit=12`
-- `GET /briefs/{slug}/`
+- `GET /series/`
+- `GET /series/{symbol}/latest/`
 
-Agent:
-- `GET /agent/status/`
-- `POST /agent/run/`
-- `GET /agent/config/`
-- `PUT /agent/config/`
-- `GET /agent/seeds/`
-- `POST /agent/seeds/`
-- `GET /agent/logs/?limit=50`
-- `GET /agent/export.csv`
+Frontend server routes: `/sitemap.xml`, `/rss.xml`, `/robots.txt`.
 
-## Agent utilities
+## Agent worker and commands
+
+The agent runs as its own compose service (`agent`, `python manage.py
+run_forever`), not inside the web process. It polls `AgentConfig` every
+second: `run_forever_enabled` / `run_forever_paused` / `run_once_requested`
+are the control flags, and it writes its heartbeat to the `AgentWorker` row.
+It also prunes old data once a day.
 
 Backend management commands:
-- `python manage.py add_seeds`
-- `python manage.py crawl_loop`
+- `python manage.py seed_sources` — load default news/price sources (never
+  overwrites an existing `AgentConfig`)
+- `python manage.py run_forever` — the agent worker
+- `python manage.py sync_price_feeds` — one-off price sync
+- `python manage.py prune_data` — delete logs/raw news/candles past
+  retention (`AGENT_LOG_RETENTION_DAYS`, `RAW_NEWS_RETENTION_DAYS`,
+  `CANDLE_RETENTION_DAYS`)
 
 ## Deployment notes
 
 - The Docker compose file exposes backend on port 8081 and frontend on 3001.
-- Use a proper secret for `DJANGO_SECRET_KEY` in production.
+- `DJANGO_SECRET_KEY` is required when `DJANGO_DEBUG=false`; the backend
+  refuses to start with a missing or placeholder key.
+- The backend serves ASGI via uvicorn (needed for SSE). If a reverse proxy
+  sits in front, disable response buffering for `/api/stream/` (the app
+  already sends `X-Accel-Buffering: no`).
 - Set `DJANGO_DEBUG=false` and configure allowed hosts and CSRF origins.
 
 ## Contributing

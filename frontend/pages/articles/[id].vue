@@ -47,7 +47,7 @@
         <div :key="articleRenderKey" class="article-stack">
       <div class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
         <p class="text-xs text-ink-500">
-          Hourly market brief
+          {{ kindLabel }}
           <span v-if="publishedLabel"> · {{ publishedLabel }}</span>
         </p>
         <h1 class="mt-3 text-3xl text-ink-900 sm:text-4xl">
@@ -205,6 +205,15 @@
         </div>
       </div>
 
+      <div v-if="aftermathLink" class="rounded-2xl border border-ink-900/10 bg-white p-6">
+        <NuxtLink
+          :to="`/articles/${aftermathLink.slug}`"
+          class="inline-flex items-center gap-2 text-sm text-ink-700 hover:text-ink-900"
+        >
+          See what happened after →
+        </NuxtLink>
+      </div>
+
       <div v-if="relatedLinks.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
         <p class="text-xs uppercase tracking-[0.12em] text-ink-500">Related briefs</p>
         <ul class="mt-3 space-y-2 text-sm text-ink-700">
@@ -248,8 +257,6 @@ const route = useRoute()
 const api = useNewsApi()
 const config = useRuntimeConfig()
 const articleId = computed(() => String(route.params.id || ''))
-const updateCheckIntervalMs = 15000
-let articleUpdateTimer = null
 
 function resetArticleScroll() {
   if (!process.client) return
@@ -307,8 +314,7 @@ const displayedArticle = ref(null)
 
 const { data: articleData, pending, error, refresh: refreshArticle } = await useAsyncData(
   () => `article-${articleId.value}`,
-  () => api.getArticle(articleId.value),
-  { server: false }
+  () => api.getArticle(articleId.value)
 )
 
 watch(articleId, () => {
@@ -336,20 +342,17 @@ watch(
   }
 )
 
-async function checkArticleUpdate() {
-  if (pending.value || error.value || !displayedArticle.value) return
-  try {
-    const latest = await api.getArticle(route.params.id)
-    if (!latest) return
-    const currentSig = articleFingerprint(displayedArticle.value)
+// Live updates arrive over SSE; they're offered as a pending update rather
+// than swapped in under the reader.
+useEventStream(() => (articleId.value ? `/stream/articles/${encodeURIComponent(articleId.value)}/` : ''), {
+  article: (latest) => {
+    if (!latest || !displayedArticle.value) return
     const latestSig = articleFingerprint(latest)
-    if (latestSig && latestSig !== currentSig) {
+    if (latestSig && latestSig !== articleFingerprint(displayedArticle.value)) {
       pendingArticleUpdate.value = cloneArticlePayload(latest)
     }
-  } catch {
-    // Ignore polling errors for update checks.
-  }
-}
+  },
+})
 
 function applyPendingUpdate() {
   if (!pendingArticleUpdate.value) return
@@ -359,16 +362,6 @@ function applyPendingUpdate() {
 
 onMounted(() => {
   resetArticleScroll()
-  articleUpdateTimer = setInterval(() => {
-    checkArticleUpdate()
-  }, updateCheckIntervalMs)
-})
-
-onBeforeUnmount(() => {
-  if (articleUpdateTimer) {
-    clearInterval(articleUpdateTimer)
-    articleUpdateTimer = null
-  }
 })
 
 watch(
@@ -382,6 +375,10 @@ const hasPendingArticleUpdate = computed(() => Boolean(pendingArticleUpdate.valu
 const articleRenderKey = computed(() => articleFingerprint(displayedArticle.value))
 const publishedLabel = computed(() => formatDate(displayedArticle.value?.hour_start))
 const updatedLabel = computed(() => formatDate(displayedArticle.value?.updated_at))
+const kindLabel = computed(() =>
+  displayedArticle.value?.kind === 'aftermath' ? 'Aftermath analysis' : 'Hourly market brief'
+)
+const aftermathLink = computed(() => displayedArticle.value?.aftermath || null)
 const relatedLinks = computed(() => {
   const items = displayedArticle.value?.related_articles || []
   return items.filter((item) => item.kind === 'side').slice(0, 2)
@@ -550,6 +547,8 @@ useHead(() => ({
         : 'NousNews report details.',
     },
     { property: 'og:type', content: 'article' },
+    { property: 'og:site_name', content: 'NousNews' },
+    { name: 'twitter:card', content: 'summary' },
     {
       property: 'og:url',
       content: `${config.public.siteDomain.replace(/\/$/, '')}/articles/${displayedArticle.value?.slug || articleId.value}`,

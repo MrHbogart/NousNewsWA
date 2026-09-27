@@ -59,10 +59,12 @@ class Card(TimeStampedModel):
 class CardArticle(TimeStampedModel):
     KIND_MAIN = "main"
     KIND_SIDE = "side"
+    KIND_AFTERMATH = "aftermath"
 
     KIND_CHOICES = [
         (KIND_MAIN, "Main"),
         (KIND_SIDE, "Side"),
+        (KIND_AFTERMATH, "Aftermath"),
     ]
 
     uuid = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
@@ -76,6 +78,9 @@ class CardArticle(TimeStampedModel):
     impacts = models.JSONField(blank=True, default=list)
     time_window = models.CharField(max_length=16, blank=True, default="")
     published_at = models.DateTimeField(null=True, blank=True)
+    # Only set for kind=aftermath: end of the post-brief price window this
+    # article describes. The window start is implicitly card.period_end.
+    aftermath_price_until = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ["-created_at"]
@@ -130,7 +135,9 @@ class AssetCandle(TimeStampedModel):
 
     class Meta:
         ordering = ["timestamp"]
-        indexes = [models.Index(fields=["series", "timestamp"])]
+        constraints = [
+            models.UniqueConstraint(fields=["series", "timestamp"], name="unique_candle_per_series_minute")
+        ]
 
     def __str__(self) -> str:
         return f"{self.series.symbol} @ {self.timestamp.isoformat()}"

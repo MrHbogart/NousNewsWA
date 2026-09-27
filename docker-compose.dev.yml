@@ -1,0 +1,28 @@
+services:
+  backend:
+    command: ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    volumes:
+      - ./backend:/app
+
+    environment:
+      DJANGO_DEBUG: "true"
+
+  agent:
+    volumes:
+      - ./backend:/app
+
+  frontend:
+    build:
+      target: development
+
+    environment:
+      NODE_ENV: development
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3001
+
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+    stdin_open: true
+    tty: true

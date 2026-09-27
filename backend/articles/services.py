@@ -2,7 +2,40 @@ from __future__ import annotations
 
 from datetime import timedelta
 
+from agent.models import PriceSource
 from articles.models import AssetCandle, AssetSeries
+
+
+def enabled_price_source_labels() -> dict[str, str]:
+    """symbol -> chart label for every series that gets price data.
+
+    That is series synced by the built-in yfinance/ccxt providers plus
+    enabled PriceSource rows; an explicit chart_label wins over a name.
+    """
+    from agent.price_sync import CCXT_SYMBOLS, YF_SYMBOLS
+
+    symbol_labels: dict[str, str] = {
+        series.symbol: series.label or series.symbol
+        for series in AssetSeries.objects.filter(symbol__in=[*YF_SYMBOLS, *CCXT_SYMBOLS])
+    }
+    explicit_labels: dict[str, bool] = {symbol: False for symbol in symbol_labels}
+    rows = (
+        PriceSource.objects.filter(enabled=True)
+        .exclude(symbol__exact="")
+        .order_by("symbol", "name", "id")
+        .values("symbol", "chart_label", "name")
+    )
+    for row in rows:
+        symbol = (row.get("symbol") or "").strip()
+        if not symbol:
+            continue
+        chart_label = (row.get("chart_label") or "").strip()
+        explicit = bool(chart_label)
+        label = chart_label or (row.get("name") or "").strip() or symbol
+        if symbol not in symbol_labels or (explicit and not explicit_labels.get(symbol)):
+            symbol_labels[symbol] = label
+            explicit_labels[symbol] = explicit
+    return symbol_labels
 
 
 def get_hour_window(at_time):

@@ -24,8 +24,12 @@ export const useInfiniteScroll = (fetchFunction, options = {}) => {
       if (!newItems || newItems.length === 0) {
         hasMore.value = false
       } else {
-        items.value = [...items.value, ...newItems]
+        // Pages are offset-based and live updates prepend items, so a page
+        // can overlap what we already have.
+        const known = new Set(items.value.map((item) => item.id))
+        items.value = [...items.value, ...newItems.filter((item) => !known.has(item.id))]
         page.value += 1
+        if (newItems.length < pageSize) hasMore.value = false
       }
     } catch (err) {
       error.value = err
@@ -33,6 +37,13 @@ export const useInfiniteScroll = (fetchFunction, options = {}) => {
     } finally {
       isLoading.value = false
     }
+  }
+
+  // Seed with a page fetched during SSR so the first client load continues from page 1.
+  const seed = (initialItems) => {
+    items.value = [...initialItems]
+    page.value = 1
+    hasMore.value = initialItems.length >= pageSize
   }
 
   const reset = () => {
@@ -46,7 +57,7 @@ export const useInfiniteScroll = (fetchFunction, options = {}) => {
   onMounted(() => {
     if (!autoLoad) return
     // Initial load so the page shows historical cards without user scroll
-    if (autoLoad) {
+    if (autoLoad && items.value.length === 0) {
       // don't await to avoid blocking mount
       loadMore().catch(() => {})
     }
@@ -97,5 +108,6 @@ export const useInfiniteScroll = (fetchFunction, options = {}) => {
     sentinel,
     loadMore,
     reset,
+    seed,
   }
 }

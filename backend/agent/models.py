@@ -45,6 +45,32 @@ DEFAULT_ARTICLE_PROMPT = (
     "- If content has low relevance to financial markets, return NULL (empty impacts list suggests rejection)\n"
 )
 
+DEFAULT_AFTERMATH_PROMPT = (
+    "You are an institutional financial journalist writing a short retrospective note.\n"
+    "You are given a market brief that was published earlier, and the actual price action\n"
+    "recorded for its tracked assets in the time since it closed.\n\n"
+    "STRICT RULES:\n"
+    "- Describe ONLY what already happened in the given price data. Never predict, forecast,\n"
+    "  or recommend a future trade direction. Do not use words like 'will', 'expect', 'likely to move',\n"
+    "  'should', or 'target'.\n"
+    "- If price moves are small or flat, say so plainly rather than inventing significance.\n"
+    "- Connect the observed move back to the original brief's stated catalyst when it plausibly explains it,\n"
+    "  but do not overstate causation the data doesn't support.\n\n"
+    "Original brief:\n"
+    "Title: {article_title}\n"
+    "Summary: {article_summary}\n"
+    "Body: {article_body}\n\n"
+    "Observed price action since the brief closed:\n"
+    "{price_moves}\n\n"
+    "Return ONLY valid JSON with this exact schema:\n"
+    "{\n"
+    '  "title": "Factual, past-tense headline about what happened to price (6-12 words)",\n'
+    '  "summary": "2-3 sentence factual recap of the observed price action (max 400 chars)",\n'
+    '  "article_text": "3-5 sentence narrative describing the observed moves and, if supported, how they relate to the original brief. No bullet lists, no predictions.",\n'
+    '  "references": []\n'
+    "}\n"
+)
+
 DEFAULT_FILTER_PROMPT = (
     "You are the NousNews relevance and impact gatekeeper.\n"
     "Decide if a news item is materially relevant to global financial markets and assign impact importance.\n\n"
@@ -77,6 +103,10 @@ class AgentConfig(TimeStampedModel):
     llm_model = models.CharField(max_length=128, default="gpt-4o-mini")
     llm_base_url = models.URLField(max_length=1000, blank=True, default="")
     llm_api_key = models.CharField(max_length=255, blank=True, default="")
+    # Authorization header scheme: "Bearer" for OpenAI-compatible APIs,
+    # e.g. "apikey" for ArvanCloud AI.
+    llm_auth_scheme = models.CharField(max_length=32, default="Bearer")
+    llm_daily_request_budget = models.PositiveIntegerField(default=200)
     llm_temperature = models.FloatField(default=0.1)
     llm_max_output_tokens = models.PositiveIntegerField(default=1400)
     max_context_chars = models.PositiveIntegerField(default=12000)
@@ -141,9 +171,18 @@ class AgentConfig(TimeStampedModel):
             "}\n"
         ),
     )
+    aftermath_prompt_template = models.TextField(blank=True, default=DEFAULT_AFTERMATH_PROMPT)
+    aftermath_min_importance_score = models.PositiveSmallIntegerField(default=2)
+    aftermath_delay_hour_minutes = models.PositiveIntegerField(default=60)
+    aftermath_delay_day_minutes = models.PositiveIntegerField(default=1440)
+    aftermath_delay_week_minutes = models.PositiveIntegerField(default=2880)
+    aftermath_delay_month_minutes = models.PositiveIntegerField(default=7200)
+
     memory_enabled = models.BooleanField(default=True)
     memory_token_limit = models.PositiveIntegerField(default=20000)
     run_forever_enabled = models.BooleanField(default=False)
+    run_forever_paused = models.BooleanField(default=False)
+    run_once_requested = models.BooleanField(default=False)
     control_password_hash = models.CharField(max_length=255, blank=True, default="")
     control_token_ttl_minutes = models.PositiveIntegerField(default=120)
 
@@ -152,19 +191,38 @@ class AgentConfig(TimeStampedModel):
         verbose_name_plural = "Agent Configuration"
 
 
+class AgentWorker(TimeStampedModel):
+    """Heartbeat/state row (pk=1) written by the `run_forever` worker process.
+
+    The worker runs in its own container; web processes only read this row
+    and write control flags on AgentConfig.
+    """
+
+    state = models.CharField(max_length=32, default="idle")
+    current_action = models.CharField(max_length=64, default="idle")
+    started_at = models.DateTimeField(null=True, blank=True)
+    heartbeat_at = models.DateTimeField(null=True, blank=True)
+    last_news_at = models.DateTimeField(null=True, blank=True)
+    last_price_at = models.DateTimeField(null=True, blank=True)
+    iterations = models.PositiveIntegerField(default=0)
+    last_error = models.TextField(blank=True, default="")
+
+
 class AgentRun(TimeStampedModel):
     STATUS_RUNNING = "running"
     STATUS_DONE = "done"
     STATUS_FAILED = "failed"
 
     status = models.CharField(max_length=20, default=STATUS_RUNNING)
-    objective = models.TextField(blank=True, default="")
     use_llm_filtering = models.BooleanField(default=True)
     started_at = models.DateTimeField(auto_now_add=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     pages_processed = models.PositiveIntegerField(default=0)
     articles_created = models.PositiveIntegerField(default=0)
     queued_urls = models.PositiveIntegerField(default=0)
+    llm_requests = models.PositiveIntegerField(default=0)
+    llm_prompt_tokens = models.PositiveIntegerField(default=0)
+    llm_completion_tokens = models.PositiveIntegerField(default=0)
     last_error = models.TextField(blank=True, default="")
 
     class Meta:
@@ -280,6 +338,7 @@ class PriceSource(TimeStampedModel):
     ]
 
     name = models.CharField(max_length=255)
+    chart_label = models.CharField(max_length=255, blank=True, default="")
     source_type = models.CharField(max_length=16, choices=SOURCE_CHOICES, default=SOURCE_EXTERNAL)
     base_url = models.URLField(max_length=1000, blank=True, default="")
     enabled = models.BooleanField(default=True)
