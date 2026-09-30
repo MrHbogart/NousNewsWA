@@ -5,6 +5,40 @@ import uuid
 from django.db import migrations, models
 
 
+# Statement-level triggers so every write (agent, admin, queryset.update)
+# NOTIFYs the SSE streams in articles/stream.py: cards/articles on
+# nousnews_content, candles on nousnews_prices.
+NOTIFY_SQL = """
+CREATE OR REPLACE FUNCTION nousnews_notify() RETURNS trigger AS $$
+BEGIN
+    PERFORM pg_notify(TG_ARGV[0], '');
+    RETURN NULL;
+END;
+$$ LANGUAGE plpgsql;
+CREATE TRIGGER articles_card_notify AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
+    ON articles_card FOR EACH STATEMENT EXECUTE FUNCTION nousnews_notify('nousnews_content');
+CREATE TRIGGER articles_cardarticle_notify AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
+    ON articles_cardarticle FOR EACH STATEMENT EXECUTE FUNCTION nousnews_notify('nousnews_content');
+CREATE TRIGGER articles_assetcandle_notify AFTER INSERT OR UPDATE OR DELETE OR TRUNCATE
+    ON articles_assetcandle FOR EACH STATEMENT EXECUTE FUNCTION nousnews_notify('nousnews_prices');
+"""
+
+DROP_NOTIFY_SQL = """
+DROP TRIGGER IF EXISTS articles_card_notify ON articles_card;
+DROP TRIGGER IF EXISTS articles_cardarticle_notify ON articles_cardarticle;
+DROP TRIGGER IF EXISTS articles_assetcandle_notify ON articles_assetcandle;
+DROP FUNCTION IF EXISTS nousnews_notify();
+"""
+
+
+def _postgres_only(sql):
+    def apply(apps, schema_editor):
+        if schema_editor.connection.vendor == "postgresql":
+            schema_editor.execute(sql)
+
+    return apply
+
+
 class Migration(migrations.Migration):
 
     initial = True
@@ -132,4 +166,5 @@ class Migration(migrations.Migration):
             model_name='cardasset',
             constraint=models.UniqueConstraint(fields=('card', 'series'), name='unique_card_asset'),
         ),
+        migrations.RunPython(_postgres_only(NOTIFY_SQL), _postgres_only(DROP_NOTIFY_SQL)),
     ]

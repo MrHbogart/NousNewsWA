@@ -61,8 +61,10 @@ class AgentWorkerTests(TestCase):
     def _run_worker(self):
         from agent.services import runtime
 
+        # close_old_connections would drop the TestCase transaction's connection.
         with mock.patch.object(runtime, "AgentService") as service_cls, \
-             mock.patch.object(runtime, "sync_price_feeds") as prices:
+             mock.patch.object(runtime, "sync_price_feeds") as prices, \
+             mock.patch.object(runtime, "close_old_connections"):
             prices.return_value.errors = []
             runtime.run_worker(max_iterations=1, sleep=lambda _s: None)
         return service_cls, prices
@@ -357,6 +359,7 @@ class DedupAndRetentionTests(TestCase):
         from agent.services import runtime
 
         AgentConfig.objects.create()
-        with mock.patch.object(runtime, "prune_old_data", return_value={}) as prune:
+        with mock.patch.object(runtime, "prune_old_data", return_value={}) as prune, \
+             mock.patch.object(runtime, "close_old_connections"):
             runtime.run_worker(max_iterations=3, sleep=lambda _s: None)
         prune.assert_called_once()

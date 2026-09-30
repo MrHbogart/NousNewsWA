@@ -356,7 +356,7 @@ class Command(BaseCommand):
             "llm_base_url": "https://openrouter.ai/api/v1",
             "llm_max_output_tokens": 20000,
             "loop_interval_minutes": 15.0,
-            "price_loop_interval_seconds": 30.0,
+            "price_loop_interval_seconds": 15.0,
             "max_items_per_source": 100,
             "max_context_chars": 50000,
         }

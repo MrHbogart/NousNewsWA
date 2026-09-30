@@ -15,9 +15,11 @@ bind mounts + hot reload for local dev):
 - `backend` — Django 5 + DRF served as ASGI by uvicorn (`--reload` in dev).
   ASGI is required: `/api/stream/*` are long-lived SSE connections.
 - `agent` — same image, `python manage.py run_forever`: the only process that
-  crawls, calls the LLM, syncs prices and prunes old data. Web processes
-  control it through `AgentConfig` flags and read its `AgentWorker`
-  heartbeat.
+  crawls, calls the LLM, syncs prices and prunes old data. The news run
+  (crawl + LLM, minutes) runs on its own thread so price syncs keep their
+  interval; each card's article+card writes are one transaction. Web
+  processes control it through `AgentConfig` flags and read its
+  `AgentWorker` heartbeat.
 - `frontend` — Nuxt 3, SSR, served by its own Nitro server (not behind
   gunicorn/nginx).
 

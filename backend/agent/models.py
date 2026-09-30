@@ -112,7 +112,7 @@ class AgentConfig(TimeStampedModel):
     max_context_chars = models.PositiveIntegerField(default=12000)
 
     loop_interval_minutes = models.FloatField(null=True, blank=True)
-    price_loop_interval_seconds = models.FloatField(default=60.0)
+    price_loop_interval_seconds = models.FloatField(default=15.0)
     max_items_per_source = models.PositiveIntegerField(default=50)
     user_agent = models.CharField(max_length=255, default="nousnews-agent/1.0 (+https://agent.miyangroup.com)")
     article_prompt_template = models.TextField(default=DEFAULT_ARTICLE_PROMPT)

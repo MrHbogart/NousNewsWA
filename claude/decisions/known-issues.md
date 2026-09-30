@@ -135,9 +135,10 @@ to a fresh `0001_initial` per app (data was disposable).
   are free but unofficial or geo-restricted; pick a provider with an SLA
   before relying on prices.
 - **No CI** (tests exist now: `python manage.py test`).
-- **Admin dashboard (`/agent-control`) still polls.** `EventSource` can't
-  send the control token header; moving it to SSE needs a cookie or
-  query-string token.
+- **Admin dashboard (`/agent-control`) still polls (5s), deliberately.**
+  `EventSource` can't send the control token header, and a query-string
+  token would land in access logs; admin-only, so polling is fine. Revisit
+  with a short-lived single-use stream ticket if it matters.
 - **No structured (JSON) logging** yet.
 - **Economist agent / `MemoryState`** remain behind
   `AGENT_ENABLE_ECONOMIST_AGENT=false` with no tests.

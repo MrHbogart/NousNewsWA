@@ -8,7 +8,7 @@ from django.utils import timezone
 
 from agent.control_auth import issue_control_token
 from agent.models import AgentConfig
-from articles.models import AssetCandle, AssetSeries, Card, CardArticle
+from articles.models import AssetCandle, AssetSeries, Card, CardArticle, CardAsset
 
 
 def _card(timeframe, period_start, period_end, slug):
@@ -112,6 +112,78 @@ class StreamTests(TransactionTestCase):
         lines = chunk.strip().split("\n")
         self.assertEqual(lines[0], "event: article")
         self.assertEqual(json.loads(lines[1].removeprefix("data: "))["title"], "Hello")
+
+    async def _pushed_after(self, url, change, event):
+        """Open `url`, apply `change` once the stream is idle; return (seconds, payload) of `event`."""
+        import asyncio
+
+        from articles import stream as stream_module
+
+        response = await self.async_client.get(url)
+        stream = aiter(response.streaming_content)
+        try:
+            await anext(stream)  # initial event
+            await anext(stream)  # retry hint
+            # Keep the stream consuming (as a server would) while the watcher
+            # takes its first fingerprints and the LISTEN connection comes up.
+            pending = asyncio.ensure_future(anext(stream))
+            while None in stream_module.watcher.fingerprints.values():
+                await asyncio.sleep(0.05)
+            while True:  # drain startup events until the stream is quiet
+                try:
+                    await asyncio.wait_for(asyncio.shield(pending), 0.5)
+                except asyncio.TimeoutError:
+                    break
+                pending = asyncio.ensure_future(anext(stream))
+            await change()
+            loop = asyncio.get_running_loop()
+            started = loop.time()
+            while True:
+                chunk = await asyncio.wait_for(pending, 10)
+                chunk = chunk.decode() if isinstance(chunk, bytes) else chunk
+                if chunk.startswith(f"event: {event}"):
+                    return loop.time() - started, json.loads(chunk.split("\n")[1].removeprefix("data: "))
+                pending = asyncio.ensure_future(anext(stream))
+        finally:
+            await stream.aclose()
+
+    async def _open_card(self):
+        now = timezone.now()
+        card = await Card.objects.acreate(
+            timeframe=Card.TIMEFRAME_HOUR, period_start=now, period_end=now + timedelta(hours=1),
+            status=Card.STATUS_OPEN, slug="c",
+        )
+        article = await CardArticle.objects.acreate(card=card, kind=CardArticle.KIND_MAIN, uuid=card.uuid, title="Old")
+        return card, article
+
+    async def test_article_stream_pushes_changes(self):
+        from articles.stream import POLL_SECONDS
+
+        card, article = await self._open_card()
+
+        async def change():
+            # Card-only change: invisible to the fingerprint, so only NOTIFY pushes it.
+            await Card.objects.filter(pk=card.pk).aupdate(importance_score=7)
+
+        elapsed, payload = await self._pushed_after(f"/api/stream/articles/{article.slug}/", change, "article")
+        self.assertLess(elapsed, POLL_SECONDS)
+        self.assertEqual(payload["importance_score"], 7)
+
+    async def test_article_stream_pushes_live_prices(self):
+        from articles.stream import POLL_SECONDS
+
+        card, article = await self._open_card()
+        series = await AssetSeries.objects.acreate(symbol="BTC-USD", label="Bitcoin")  # provider-mapped
+        await CardAsset.objects.acreate(card=card, series=series)
+
+        async def change():
+            ts = card.period_start + timedelta(minutes=1)
+            await AssetCandle.objects.acreate(series=series, timestamp=ts, open=1, high=2, low=1, close=1.5)
+
+        elapsed, payload = await self._pushed_after(f"/api/stream/articles/{article.slug}/", change, "prices")
+        self.assertLess(elapsed, POLL_SECONDS)
+        self.assertEqual(payload["id"], str(article.uuid))
+        self.assertEqual(payload["price_series"][0]["candles"][-1]["close"], 1.5)
 
     async def test_article_stream_404(self):
         response = await self.async_client.get("/api/stream/articles/nope/")

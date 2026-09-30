@@ -272,21 +272,15 @@ function cloneArticlePayload(payload) {
   return JSON.parse(JSON.stringify(payload))
 }
 
+// Text only: price ticks update the charts live without re-rendering the
+// article or raising the "newer version" banner.
 function articleFingerprint(payload) {
   if (!payload || typeof payload !== 'object') return ''
-  const seriesSignature = (payload.price_series || [])
-    .map((series) => {
-      const candles = series.candles || []
-      const last = candles[candles.length - 1] || {}
-      return `${series.symbol || ''}:${candles.length}:${last.timestamp || ''}:${last.close || ''}`
-    })
-    .join(';')
   return [
     payload.updated_at || '',
     payload.title || '',
     payload.summary || '',
     payload.article_content || '',
-    seriesSignature,
   ].join('|')
 }
 
@@ -350,9 +344,21 @@ useEventStream(() => (articleId.value ? `/stream/articles/${encodeURIComponent(a
     const latestSig = articleFingerprint(latest)
     if (latestSig && latestSig !== articleFingerprint(displayedArticle.value)) {
       pendingArticleUpdate.value = cloneArticlePayload(latest)
+    } else {
+      applyLivePrices(latest)
     }
   },
+  prices: applyLivePrices,
 })
+
+function applyLivePrices(payload) {
+  if (!payload?.price_series || !displayedArticle.value) return
+  if (payload.id !== displayedArticle.value.id) return
+  displayedArticle.value = { ...displayedArticle.value, price_series: payload.price_series }
+  if (pendingArticleUpdate.value) {
+    pendingArticleUpdate.value = { ...pendingArticleUpdate.value, price_series: payload.price_series }
+  }
+}
 
 function applyPendingUpdate() {
   if (!pendingArticleUpdate.value) return

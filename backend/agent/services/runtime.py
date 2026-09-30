@@ -140,8 +140,21 @@ def _news_run(config: AgentConfig) -> None:
         _log_loop_event("worker_news_run_failed", level=AgentLogEvent.LEVEL_WARN, metadata={"error": str(exc)[:2000]})
 
 
+def _news_thread(config: AgentConfig) -> threading.Thread:
+    # A news run (crawl + LLM) takes minutes; run it beside the loop so price
+    # syncs keep their interval and charts stay live meanwhile.
+    def target():
+        try:
+            _news_run(config)
+        finally:
+            connection.close()
+
+    thread = threading.Thread(target=target, name="agent-news", daemon=True)
+    thread.start()
+    return thread
+
+
 def _price_sync(config: AgentConfig) -> None:
-    _update_worker(current_action="price_sync")
     try:
         stats = sync_price_feeds(user_agent=config.user_agent)
         _update_worker(last_price_at=timezone.now())
@@ -170,9 +183,11 @@ def run_worker(*, max_iterations: Optional[int] = None, sleep: Callable[[float],
     last_news = last_price = float("-inf")
     last_prune_day = None
     iterations = 0
+    news = None
     try:
         while max_iterations is None or iterations < max_iterations:
             close_old_connections()
+            news_busy = news is not None and news.is_alive()
             today = timezone.now().date()
             if today != last_prune_day:
                 last_prune_day = today
@@ -181,23 +196,26 @@ def run_worker(*, max_iterations: Optional[int] = None, sleep: Callable[[float],
                 except Exception as exc:
                     _log_loop_event("retention_prune_failed", level=AgentLogEvent.LEVEL_WARN, metadata={"error": str(exc)[:2000]})
             config = get_config()
-            if config.run_once_requested:
+            if config.run_once_requested and not news_busy:
                 AgentConfig.objects.filter(pk=config.pk).update(run_once_requested=False)
-                _news_run(config)
+                news = _news_thread(config)
                 last_news = time.monotonic()
             elif config.run_forever_enabled and not config.run_forever_paused:
                 news_interval = max(60.0, float(config.loop_interval_minutes or 15.0) * 60.0)
-                price_interval = max(5.0, float(config.price_loop_interval_seconds or 60.0))
-                if time.monotonic() - last_news >= news_interval:
-                    _news_run(config)
+                price_interval = max(5.0, float(config.price_loop_interval_seconds or 15.0))
+                if not news_busy and time.monotonic() - last_news >= news_interval:
+                    news = _news_thread(config)
                     last_news = time.monotonic()
                 if time.monotonic() - last_price >= price_interval:
                     _price_sync(config)
                     last_price = time.monotonic()
             iterations += 1
-            _update_worker(current_action="sleeping", heartbeat_at=timezone.now(), iterations=iterations)
+            action = "news_run" if news is not None and news.is_alive() else "sleeping"
+            _update_worker(current_action=action, heartbeat_at=timezone.now(), iterations=iterations)
             sleep(1.0)
     finally:
+        if news is not None:
+            news.join()
         stop.set()
         _update_worker(state="stopped", current_action="stopped")
         _log_loop_event("worker_stopped")

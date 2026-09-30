@@ -6,6 +6,8 @@ from difflib import SequenceMatcher
 from typing import Optional
 from uuid import uuid4
 
+from django.db import transaction
+
 from agent.models import AgentLogEvent, AgentRun
 from articles.models import AssetSeries, Card, CardArticle, CardAsset
 from articles.services import enabled_price_source_labels, get_period_window
@@ -64,34 +66,36 @@ class CardsMixin:
         )
         side_payloads = self._build_side_articles(records)
 
-        card.published_at = published_at
-        self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
+        # One transaction: SSE readers never see new articles on a stale card.
+        with transaction.atomic():
+            card.published_at = published_at
+            self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
 
-        card.title = main_payload["title"]
-        card.summary = main_payload["summary"]
-        card.body = main_payload["body"]
-        card.references = main_payload["references"]
-        card.importance_score = main_payload["importance_score"]
-        card.importance_reason = main_payload["importance_reason"]
-        card.source_name = source_label
-        card.published_at = published_at
-        card.article_count = len(records)
-        card.status = Card.STATUS_OPEN
-        card.save(
-            update_fields=[
-                "title",
-                "summary",
-                "body",
-                "references",
-                "importance_score",
-                "importance_reason",
-                "source_name",
-                "published_at",
-                "article_count",
-                "status",
-            ]
-        )
-        self._ensure_card_assets(card)
+            card.title = main_payload["title"]
+            card.summary = main_payload["summary"]
+            card.body = main_payload["body"]
+            card.references = main_payload["references"]
+            card.importance_score = main_payload["importance_score"]
+            card.importance_reason = main_payload["importance_reason"]
+            card.source_name = source_label
+            card.published_at = published_at
+            card.article_count = len(records)
+            card.status = Card.STATUS_OPEN
+            card.save(
+                update_fields=[
+                    "title",
+                    "summary",
+                    "body",
+                    "references",
+                    "importance_score",
+                    "importance_reason",
+                    "source_name",
+                    "published_at",
+                    "article_count",
+                    "status",
+                ]
+            )
+            self._ensure_card_assets(card)
         self._log_event(
             run=run,
             step=AgentLogEvent.STEP_CARD_GENERATION,
@@ -148,34 +152,36 @@ class CardsMixin:
                 run=run,
             )
             side_payloads = self._build_side_articles(records)
-            card.published_at = published_at
-            self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
+            # One transaction: SSE readers never see new articles on a stale card.
+            with transaction.atomic():
+                card.published_at = published_at
+                self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
 
-            card.title = main_payload["title"]
-            card.summary = main_payload["summary"]
-            card.body = main_payload["body"]
-            card.references = main_payload["references"]
-            card.importance_score = main_payload["importance_score"]
-            card.importance_reason = main_payload["importance_reason"]
-            card.source_name = source_label
-            card.published_at = published_at
-            card.article_count = len(records)
-            card.status = Card.STATUS_FINAL
-            card.save(
-                update_fields=[
-                    "title",
-                    "summary",
-                    "body",
-                    "references",
-                    "importance_score",
-                    "importance_reason",
-                    "source_name",
-                    "published_at",
-                    "article_count",
-                    "status",
-                ]
-            )
-            self._ensure_card_assets(card)
+                card.title = main_payload["title"]
+                card.summary = main_payload["summary"]
+                card.body = main_payload["body"]
+                card.references = main_payload["references"]
+                card.importance_score = main_payload["importance_score"]
+                card.importance_reason = main_payload["importance_reason"]
+                card.source_name = source_label
+                card.published_at = published_at
+                card.article_count = len(records)
+                card.status = Card.STATUS_FINAL
+                card.save(
+                    update_fields=[
+                        "title",
+                        "summary",
+                        "body",
+                        "references",
+                        "importance_score",
+                        "importance_reason",
+                        "source_name",
+                        "published_at",
+                        "article_count",
+                        "status",
+                    ]
+                )
+                self._ensure_card_assets(card)
             finalized += 1
 
             self._log_event(
@@ -230,34 +236,36 @@ class CardsMixin:
                 )
                 side_payloads = self._build_side_articles(records)
 
-                card.published_at = published_at
-                self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
+                # One transaction: SSE readers never see new articles on a stale card.
+                with transaction.atomic():
+                    card.published_at = published_at
+                    self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
 
-                card.title = main_payload["title"]
-                card.summary = main_payload["summary"]
-                card.body = main_payload["body"]
-                card.references = main_payload["references"]
-                card.importance_score = main_payload["importance_score"]
-                card.importance_reason = main_payload["importance_reason"]
-                card.source_name = source_label
-                card.published_at = published_at
-                card.article_count = total_items
-                card.status = Card.STATUS_FINAL
-                card.save(
-                    update_fields=[
-                        "title",
-                        "summary",
-                        "body",
-                        "references",
-                        "importance_score",
-                        "importance_reason",
-                        "source_name",
-                        "published_at",
-                        "article_count",
-                        "status",
-                    ]
-                )
-                self._ensure_card_assets(card)
+                    card.title = main_payload["title"]
+                    card.summary = main_payload["summary"]
+                    card.body = main_payload["body"]
+                    card.references = main_payload["references"]
+                    card.importance_score = main_payload["importance_score"]
+                    card.importance_reason = main_payload["importance_reason"]
+                    card.source_name = source_label
+                    card.published_at = published_at
+                    card.article_count = total_items
+                    card.status = Card.STATUS_FINAL
+                    card.save(
+                        update_fields=[
+                            "title",
+                            "summary",
+                            "body",
+                            "references",
+                            "importance_score",
+                            "importance_reason",
+                            "source_name",
+                            "published_at",
+                            "article_count",
+                            "status",
+                        ]
+                    )
+                    self._ensure_card_assets(card)
                 total_finalized += 1
 
                 self._log_event(

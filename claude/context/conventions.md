@@ -28,7 +28,16 @@
   views returning `StreamingHttpResponse` — DRF doesn't stream. Payload
   builders (`last_hour_payload`, `briefs_payload`, `article_payload` in
   `articles/views.py`) are shared by the REST views and the streams, so the
-  two can't drift.
+  two can't drift. Streams are pushed by Postgres `LISTEN/NOTIFY`: triggers
+  created in `articles/0001_initial` fire `nousnews_content` on every
+  `articles_card`/`articles_cardarticle` write and `nousnews_prices` on every
+  `articles_assetcandle` write, with a 3s fingerprint poll per topic as
+  fallback. Price ticks go out as a small `prices` event (`{id,
+  price_series}`) that the pages patch into the charts in place — the
+  article page's fingerprint deliberately ignores `price_series` so ticks
+  don't raise the "newer version" banner. Needs a direct (session) DB
+  connection — pgbouncer in transaction mode drops `LISTEN`, leaving only
+  the poll.
 - **`agent/services/` is a package of mixins composing one `AgentService`
   class** (`agent/services/service.py`), not several independent services —
   every method still runs with the full `AgentService` as `self`, so any

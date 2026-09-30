@@ -77,18 +77,27 @@ const historicalCards = computed(() =>
 )
 const totalCards = computed(() => (currentCard.value ? 1 : 0) + historicalCards.value.length)
 
-// Prepend newly published briefs without discarding pages already scrolled into.
+// Prepend newly published briefs and refresh edited ones, without discarding
+// pages already scrolled into.
 function mergeLatestBriefs(newest) {
   if (!newest?.length) return
-  const knownIds = new Set(infiniteScroll.items.value.map((item) => item.id))
+  const byId = new Map(newest.map((item) => [item.id, item]))
+  const known = infiniteScroll.items.value.map((item) => byId.get(item.id) || item)
+  const knownIds = new Set(known.map((item) => item.id))
   const fresh = newest.filter((item) => !knownIds.has(item.id))
-  if (fresh.length) infiniteScroll.items.value = [...fresh, ...infiniteScroll.items.value]
+  infiniteScroll.items.value = [...fresh, ...known]
 }
 
 useEventStream('/stream/home/', {
   home: (payload) => {
     if (payload?.lasthour) currentCard.value = payload.lasthour
     mergeLatestBriefs(payload?.briefs?.results)
+  },
+  // Live chart ticks for the current hour's brief.
+  prices: (payload) => {
+    if (payload?.id && payload.id === currentCard.value?.id) {
+      currentCard.value = { ...currentCard.value, price_series: payload.price_series }
+    }
   },
 })
 

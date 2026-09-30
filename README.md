@@ -140,9 +140,13 @@ Articles and briefs (`backend/articles/urls.py`):
 
 Live updates (Server-Sent Events, `backend/articles/stream.py`):
 - `GET /stream/home/` — `event: home` with `{lasthour, briefs}` on connect
-  and whenever content changes; `: ping` every 15s
+  and whenever content changes; `event: prices` with `{id, price_series}`
+  for the current hour's brief on every price tick; `: ping` every 15s
 - `GET /stream/articles/{uuid-or-slug}/` — `event: article` on connect and
-  on change
+  on change; `event: prices` for that article's charts on every price tick
+- Both are pushed via Postgres `LISTEN/NOTIFY` (well under a second after a
+  write); the worker syncs prices every `price_loop_interval_seconds`
+  (default 15s), independent of the news run
 
 Agent (`backend/agent/urls.py`; all need a control token from
 `POST /agent/control/login/`, sent as `Authorization: Bearer <token>`):
