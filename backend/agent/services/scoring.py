@@ -9,6 +9,11 @@ from dateutil import parser as dtparser
 from agent.models import AgentLogEvent, AgentRun
 
 
+def _mentions(text: str, term: str) -> bool:
+    # Whole words (plus plural), so "pet" doesn't hit "competition" or "fed" "offered".
+    return re.search(rf"\b{re.escape(term)}(?:s|es)?\b", text) is not None
+
+
 class ScoringMixin:
     """Heuristic + LLM-assisted relevance/importance scoring used to decide what gets written up."""
 
@@ -184,9 +189,9 @@ class ScoringMixin:
             "housing",
         ]
 
-        if any(token in combined for token in high_impact_tokens):
+        if any(_mentions(combined, token) for token in high_impact_tokens):
             score = 3
-        elif any(token in combined for token in medium_impact_tokens):
+        elif any(_mentions(combined, token) for token in medium_impact_tokens):
             score = 2
         else:
             score = 1
@@ -195,15 +200,15 @@ class ScoringMixin:
             score += 1
 
         channels = []
-        if any(token in combined for token in ["rate", "yield", "bond", "treasury", "inflation", "central bank"]):
+        if any(_mentions(combined, token) for token in ["rate", "yield", "bond", "treasury", "inflation", "central bank"]):
             channels.append("rates and monetary policy")
-        if any(token in combined for token in ["currency", "forex", "fx", "dollar", "euro", "yen"]):
+        if any(_mentions(combined, token) for token in ["currency", "forex", "fx", "dollar", "euro", "yen"]):
             channels.append("FX positioning")
-        if any(token in combined for token in ["oil", "gas", "commodity", "energy", "metal"]):
+        if any(_mentions(combined, token) for token in ["oil", "gas", "commodity", "energy", "metal"]):
             channels.append("commodity pricing")
-        if any(token in combined for token in ["equity", "stock", "earnings", "valuation", "sector"]):
+        if any(_mentions(combined, token) for token in ["equity", "stock", "earnings", "valuation", "sector"]):
             channels.append("equity risk appetite")
-        if any(token in combined for token in ["credit", "default", "spread", "bank"]):
+        if any(_mentions(combined, token) for token in ["credit", "default", "spread", "bank"]):
             channels.append("credit conditions")
         if not channels:
             channels.append("broad macro sentiment")
@@ -232,6 +237,7 @@ class ScoringMixin:
 
         financial_keywords = [
             "fed",
+            "federal reserve",
             "central bank",
             "ecb",
             "bank of england",
@@ -351,16 +357,16 @@ class ScoringMixin:
         score = 0
 
         for kw in financial_keywords:
-            if kw in combined:
+            if _mentions(combined, kw):
                 score += 2
 
         title_lower = (title or "").lower()
         for high in ["central bank", "fed", "interest rate", "inflation", "gdp", "default", "bankruptcy", "sanction"]:
-            if high in title_lower:
+            if _mentions(title_lower, high):
                 score += 4
 
         for kw in reject_keywords:
-            if kw in combined:
+            if _mentions(combined, kw):
                 score -= 3
 
         relevant_sentences = cls._extract_relevant_sentences(text)
@@ -410,6 +416,6 @@ class ScoringMixin:
         picks = []
         for sentence in sentences:
             low = sentence.lower()
-            if any(term in low for term in financial_terms):
+            if any(_mentions(low, term) for term in financial_terms):
                 picks.append(sentence.strip())
         return " ".join(picks).strip()

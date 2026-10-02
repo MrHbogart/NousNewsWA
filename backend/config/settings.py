@@ -111,6 +111,9 @@ REST_FRAMEWORK = {
     "DEFAULT_PARSER_CLASSES": [
         "rest_framework.parsers.JSONParser",
     ],
+    # Throttle on REMOTE_ADDR, never the client-supplied X-Forwarded-For;
+    # uvicorn rewrites REMOTE_ADDR only for proxies in FORWARDED_ALLOW_IPS.
+    "NUM_PROXIES": 0,
     "DEFAULT_THROTTLE_RATES": {
         "agent_control_login": "5/min",
     },

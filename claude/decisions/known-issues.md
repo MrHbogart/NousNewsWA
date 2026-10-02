@@ -129,6 +129,38 @@ to a fresh `0001_initial` per app (data was disposable).
 - **Near-duplicate stories across sources** are collapsed by title
   similarity when a period's records are loaded.
 
+## Fixed in the production-readiness pass (2026-10-02)
+
+- **Keyword scoring matched substrings**: "pet" hit "competition", "cat"
+  "allocation", "fed" "offered", so finance stories lost points. Now whole
+  words (plus plurals) via `scoring._mentions`; "federal reserve" added.
+- **LLM-accepted items were discarded**: `_load_raw_records` re-scored rows
+  that already passed ingest, dropping every item only the LLM filter had
+  accepted. Re-score removed.
+- **Month cards ran O(n²) fuzzy title dedup** over every raw row of the month.
+  Now compared against the newest 200 kept titles only.
+- **Hour/day LLM context had no size cap**: busy periods overflowed the model
+  context, so the call failed and still spent budget. `max_context_chars`
+  now applies to every timeframe (raise it in admin if hourly briefs feel thin).
+- **Already-stored items re-spent LLM filter budget** every run; they are now
+  skipped before scoring (`items_already_stored` in `source_fetch_completed`).
+- **Placeholder `synthetic.local` URLs** were shown as article references.
+- **Runs orphaned by a worker restart stayed "running"** forever; the worker
+  marks them failed on start.
+- **Price sync only wrote the forming bar**, so each minute's final close
+  could be up to one sync interval stale. It now writes the last two bars.
+- **Login throttle bypass**: DRF keyed throttles on client-supplied
+  `X-Forwarded-For` (`NUM_PROXIES` unset) and uvicorn trusted proxy headers
+  from any IP. Now `NUM_PROXIES=0`, and proxies come from `FORWARDED_ALLOW_IPS`.
+- **`AgentLogEvent.created_at` index** for the dashboard and retention queries.
+- **Candle aggregation** reads plain tuples instead of model instances.
+- **Frontend**: RSS `<guid>` was always empty (used `uuid`, the API sends
+  `id`); chart High/Low labels never rendered (`v-if` + `v-for` on one
+  element); "Read full article" only showed for summaries over 280 chars; week
+  and month cards were labelled "24-Hour Summary" with a 1-day range; times
+  were local while periods and chart axes are UTC (also an SSR hydration
+  mismatch) — now UTC throughout.
+
 ## Open — flagged, not changed
 
 - **No paid/maintained price provider yet.** yfinance and Binance (via ccxt)

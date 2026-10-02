@@ -132,6 +132,14 @@ class FetchingMixin:
                     )
                     continue
 
+                # Items stored by an earlier run: skip before scoring so they
+                # don't spend LLM filter budget again every run.
+                stored_urls = set(
+                    RawNewsItem.objects.filter(
+                        url__in=[(item.get("url") or "").strip() for item in fetched.items if item.get("url")]
+                    ).values_list("url", flat=True)
+                )
+                source_known = 0
                 seen_keys = set()
                 source_latest: Optional[datetime] = None
                 source_seen = 0
@@ -143,6 +151,9 @@ class FetchingMixin:
                 for item in fetched.items:
                     source_seen += 1
                     stats.items_seen += 1
+                    if (item.get("url") or "").strip() in stored_urls:
+                        source_known += 1
+                        continue
 
                     title = (item.get("title") or "").strip()
                     summary = (item.get("summary") or "").strip()
@@ -226,6 +237,7 @@ class FetchingMixin:
                         "items_rejected": source_rejected,
                         "items_rejected_old": source_rejected_old,
                         "items_rejected_llm": source_rejected_llm,
+                        "items_already_stored": source_known,
                         "min_published_at": self._current_run_min_published_at,
                         "duration_ms": fetched.duration_ms,
                     },

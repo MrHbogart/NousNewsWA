@@ -7,7 +7,7 @@
     </div>
 
     <div class="daily-card-content">
-      <div class="daily-card-badge">24-Hour Summary</div>
+      <div class="daily-card-badge">{{ badgeLabel }}</div>
 
       <div class="daily-card-header">
         <h2 class="daily-card-title">{{ card.title || 'Daily Market Summary' }}</h2>
@@ -57,7 +57,7 @@
                 class="daily-card-chart-canvas"
                 :viewBox="`0 0 ${chartConfig.width} ${chartConfig.height}`"
                 role="img"
-                :aria-label="`${priceSeries[activeSeriesIndex]?.label} 24-hour candlestick chart`"
+                :aria-label="`${priceSeries[activeSeriesIndex]?.label} ${badgeLabel} candlestick chart`"
               >
                 <g class="chart-grid">
                   <line
@@ -111,17 +111,17 @@
                     stroke-width="1.2"
                     stroke-dasharray="4 4"
                   />
-                  <text
-                    v-for="(guide, idx) in (currentSeriesData.priceLines || [])"
-                    v-if="guide && guide.kind !== 'last'"
-                    :key="`guide-label-${idx}`"
-                    :x="chartConfig.width - 6"
-                    :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
-                    text-anchor="end"
-                    :fill="guide.color"
-                  >
-                    {{ guide.label }}
-                  </text>
+                  <template v-for="(guide, idx) in (currentSeriesData.priceLines || [])" :key="`guide-label-${idx}`">
+                    <text
+                      v-if="guide.kind !== 'last'"
+                      :x="chartConfig.width - 6"
+                      :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
+                      text-anchor="end"
+                      :fill="guide.color"
+                    >
+                      {{ guide.label }}
+                    </text>
+                  </template>
                   <text
                     v-if="currentSeriesData.lastPriceLabel"
                     :x="chartConfig.width - 6"
@@ -213,14 +213,15 @@ const chartTransitionName = computed(() =>
 
 const formattedDate = computed(() => {
   const date = new Date(props.card.hour_start || props.card.created_at || '')
-  if (Number.isNaN(date.getTime())) return 'Daily Summary'
-  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  if (Number.isNaN(date.getTime())) return 'Summary'
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 })
 
-const showReadMore = computed(() => {
-  const summary = props.card.summary || ''
-  return summary.length > 280
-})
+// Week and month briefs render with this card too.
+const BADGES = { day: 'Daily Summary', week: 'Weekly Summary', month: 'Monthly Summary' }
+const badgeLabel = computed(() => BADGES[props.card.timeframe] || 'Summary')
+
+const showReadMore = computed(() => Boolean(props.card.slug || props.card.id))
 
 const importanceScore = computed(() => normalizeImportanceScore(props.card.importance_score))
 
@@ -370,14 +371,11 @@ function formatTimeLabel(value) {
 }
 
 function formatDateRange(item) {
-  const date = new Date(item.hour_start || item.created_at || '')
-  if (Number.isNaN(date.getTime())) return 'Daily Summary'
-
-  const startDate = new Date(date)
-  const endDate = new Date(startDate)
-  endDate.setDate(endDate.getDate() + 1)
-
-  return `${startDate.toLocaleDateString('en-US', { month: 'short', day: '2-digit' })} 00:00 - ${endDate.toLocaleDateString('en-US', { month: 'short', day: '2-digit' })} 00:00`
+  const start = new Date(item.period_start || item.hour_start || '')
+  const end = new Date(item.period_end || '')
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
+  const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', timeZone: 'UTC' })
+  return `${fmt(start)} – ${fmt(end)} UTC`
 }
 </script>
 

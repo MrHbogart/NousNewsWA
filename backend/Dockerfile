@@ -45,4 +45,6 @@ EXPOSE 8000
 
 ENTRYPOINT ["/app/entrypoint.sh"]
 # ASGI so each worker can hold many long-lived SSE connections (/api/stream/*).
-CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--forwarded-allow-ips", "*", "--timeout-graceful-shutdown", "10"]
+# Proxy headers are trusted only from FORWARDED_ALLOW_IPS (env; uvicorn's
+# default is 127.0.0.1) — trusting "*" let any client spoof its IP.
+CMD ["uvicorn", "config.asgi:application", "--host", "0.0.0.0", "--port", "8000", "--workers", "2", "--proxy-headers", "--timeout-graceful-shutdown", "10"]

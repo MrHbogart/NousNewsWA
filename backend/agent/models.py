@@ -276,6 +276,7 @@ class AgentLogEvent(TimeStampedModel):
     class Meta:
         ordering = ["-created_at"]
         indexes = [
+            models.Index(fields=["created_at"]),
             models.Index(fields=["step", "created_at"]),
             models.Index(fields=["run", "created_at"]),
         ]

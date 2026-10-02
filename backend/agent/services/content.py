@@ -314,8 +314,8 @@ class ContentMixin:
             piece = f"({source}) {title}\nSummary: {summary}\nDetails: {content}\nURL: {url}"
             chunks.append(piece)
         combined = "\n\n".join(chunks)
-        if timeframe in (Card.TIMEFRAME_HOUR, Card.TIMEFRAME_DAY):
-            return combined
+        # Every timeframe is capped: an uncapped busy hour/day overflowed the
+        # model context, so the call failed and still spent budget.
         max_chars = int(self.config.max_context_chars or 0)
         if max_chars > 0:
             combined = combined[:max_chars]
@@ -476,6 +476,9 @@ class ContentMixin:
         cleaned = []
         for url in urls:
             trimmed = url.strip().rstrip(").,;")
+            # Placeholder URLs for link-less items (see _synthetic_url) aren't real pages.
+            if trimmed.startswith("https://synthetic.local/"):
+                continue
             if trimmed and trimmed not in cleaned:
                 cleaned.append(trimmed)
         return cleaned[:10]

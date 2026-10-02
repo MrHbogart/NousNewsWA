@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from types import SimpleNamespace
 
 from agent.models import PriceSource
 from articles.models import AssetCandle, AssetSeries
@@ -87,10 +88,16 @@ def aggregate_candles(
 ) -> list[dict]:
     if interval_minutes <= 0 or max_buckets <= 0:
         return []
-    candles = list(
+    # Plain tuples, not model instances: a month card reads ~43k rows per series.
+    # ponytail: buckets in Python; move to SQL date_bin() if this shows up in profiles.
+    rows = (
         AssetCandle.objects.filter(series=series, timestamp__gte=start, timestamp__lt=end)
         .order_by("timestamp")
+        .values_list("timestamp", "open", "high", "low", "close", "volume")
     )
+    candles = [
+        SimpleNamespace(timestamp=t, open=o, high=h, low=lo, close=c, volume=v) for t, o, h, lo, c, v in rows
+    ]
     if not candles:
         return []
     buckets: list[dict] = []

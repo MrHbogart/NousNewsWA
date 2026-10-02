@@ -6,7 +6,7 @@ export default defineEventHandler(async (event) => {
     const date = brief.published_at || brief.period_end
     return (
       `<item><title>${escapeXml(brief.title)}</title><link>${escapeXml(link)}</link>` +
-      `<guid isPermaLink="false">${escapeXml(brief.uuid)}</guid>` +
+      `<guid isPermaLink="false">${escapeXml(brief.id)}</guid>` +
       `<description>${escapeXml(brief.summary)}</description>` +
       (date ? `<pubDate>${new Date(date).toUTCString()}</pubDate>` : '') +
       `</item>`

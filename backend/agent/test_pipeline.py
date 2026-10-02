@@ -277,7 +277,7 @@ class LlmAndPriceFeedTests(TestCase):
         stats = price_sync.PriceFeedStats()
         with mock.patch.dict(sys.modules, {"ccxt": fake_ccxt}):
             price_sync._sync_from_ccxt(stats, timezone.now())
-        exchange.fetch_ohlcv.assert_called_once_with("BTC/USDT", "1m", limit=1)
+        exchange.fetch_ohlcv.assert_called_once_with("BTC/USDT", "1m", limit=2)
         candle = AssetCandle.objects.get()
         self.assertEqual(candle.timestamp, datetime.fromtimestamp(bar_ms / 1000, tz=dt_timezone.utc))
         self.assertEqual(candle.close, 1.5)
@@ -363,3 +363,50 @@ class DedupAndRetentionTests(TestCase):
              mock.patch.object(runtime, "close_old_connections"):
             runtime.run_worker(max_iterations=3, sleep=lambda _s: None)
         prune.assert_called_once()
+
+
+class ProductionReviewFixTests(TestCase):
+    def test_keywords_match_whole_words_only(self):
+        from agent.services.scoring import _mentions
+
+        self.assertFalse(_mentions("fierce competition for capital allocation", "pet"))
+        self.assertFalse(_mentions("fierce competition for capital allocation", "cat"))
+        self.assertTrue(_mentions("treasury yields jumped", "yield"))
+        self.assertTrue(_mentions("new tariffs announced", "tariff"))
+
+    def test_llm_accepted_low_score_item_is_used_for_the_card(self):
+        from dataset.models import RawNewsItem
+
+        config = AgentConfig.objects.create()
+        published = timezone.now() - timedelta(minutes=5)
+        # Scores below the heuristic gate; only an LLM accept would have stored it.
+        RawNewsItem.objects.create(
+            source_name="s", url="https://example.com/llm-ok", title="Shipping firm reroutes vessels",
+            cleaned_text="Shipping firm reroutes vessels.", published_at=published,
+        )
+        service = AgentService(config=config)
+        try:
+            records = service._load_raw_records(published - timedelta(minutes=1), timezone.now())
+        finally:
+            service.close()
+        self.assertEqual([r["url"] for r in records], ["https://example.com/llm-ok"])
+
+    def test_synthetic_urls_are_not_references(self):
+        service = AgentService(config=AgentConfig.objects.create())
+        try:
+            refs = service._normalize_references(["https://synthetic.local/src/1-abc", "https://real.example/a"])
+        finally:
+            service.close()
+        self.assertEqual(refs, ["https://real.example/a"])
+
+    def test_worker_start_fails_runs_orphaned_by_a_restart(self):
+        from agent.services import runtime
+
+        AgentConfig.objects.create()
+        orphan = AgentRun.objects.create(status=AgentRun.STATUS_RUNNING)
+        with mock.patch.object(runtime, "prune_old_data", return_value={}), \
+             mock.patch.object(runtime, "close_old_connections"):
+            runtime.run_worker(max_iterations=1, sleep=lambda _s: None)
+        orphan.refresh_from_db()
+        self.assertEqual(orphan.status, AgentRun.STATUS_FAILED)
+        self.assertIsNotNone(orphan.ended_at)

@@ -82,17 +82,19 @@ def _sync_from_yfinance(stats: PriceFeedStats, now: datetime) -> None:
             history = yf.Ticker(ticker).history(period="1d", interval="1m")
             if history is None or history.empty:
                 continue
-            bar_time = history.index[-1].to_pydatetime().astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
-            latest = history.iloc[-1]
-            close = _as_float(latest.get("Close"))
-            if close is None or close <= 0:
-                continue
-            open_value = _as_float(latest.get("Open")) or close
-            high = _as_float(latest.get("High")) or max(open_value, close)
-            low = _as_float(latest.get("Low")) or min(open_value, close)
-            volume = _as_float(latest.get("Volume"), default=0.0) or 0.0
-            _upsert_candle(AssetSeries.objects.get(symbol=symbol), bar_time, open_value, high, low, close, volume)
-            stats.api_prices_recorded += 1
+            series = AssetSeries.objects.get(symbol=symbol)
+            # Last two bars: the previous minute gets its final values once it closes.
+            for index, latest in history.tail(2).iterrows():
+                bar_time = index.to_pydatetime().astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
+                close = _as_float(latest.get("Close"))
+                if close is None or close <= 0:
+                    continue
+                open_value = _as_float(latest.get("Open")) or close
+                high = _as_float(latest.get("High")) or max(open_value, close)
+                low = _as_float(latest.get("Low")) or min(open_value, close)
+                volume = _as_float(latest.get("Volume"), default=0.0) or 0.0
+                _upsert_candle(series, bar_time, open_value, high, low, close, volume)
+                stats.api_prices_recorded += 1
         except Exception as exc:
             _record_error(stats, f"yfinance {ticker}: {exc}")
 
@@ -108,15 +110,15 @@ def _sync_from_ccxt(stats: PriceFeedStats, now: datetime) -> None:
     for symbol in present:
         market = CCXT_SYMBOLS[symbol]
         try:
-            ohlcv = exchange.fetch_ohlcv(market, "1m", limit=1)
-            if not ohlcv:
-                continue
-            ts_ms, open_price, high, low, close, volume = ohlcv[-1][:6]
-            if not close or close <= 0:
-                continue
-            bar_time = datetime.fromtimestamp(ts_ms / 1000, tz=dt_timezone.utc)
-            _upsert_candle(AssetSeries.objects.get(symbol=symbol), bar_time, open_price, high, low, close, volume or 0.0)
-            stats.api_prices_recorded += 1
+            # Last two bars: the previous minute gets its final values once it closes.
+            ohlcv = exchange.fetch_ohlcv(market, "1m", limit=2)
+            series = AssetSeries.objects.get(symbol=symbol)
+            for ts_ms, open_price, high, low, close, volume in (row[:6] for row in ohlcv or []):
+                if not close or close <= 0:
+                    continue
+                bar_time = datetime.fromtimestamp(ts_ms / 1000, tz=dt_timezone.utc)
+                _upsert_candle(series, bar_time, open_price, high, low, close, volume or 0.0)
+                stats.api_prices_recorded += 1
         except Exception as exc:
             _record_error(stats, f"ccxt {market}: {exc}")
 

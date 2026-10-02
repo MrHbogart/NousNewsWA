@@ -575,17 +575,20 @@ class CardsMixin:
         seen = set()
         kept_titles: list[str] = []
         for raw in qs:
+            # Stored rows already passed the relevance gate at ingest (heuristic
+            # or LLM); re-scoring here used to drop every LLM-accepted item.
             cleaned = raw.cleaned_text or self._clean_text(raw.content or raw.summary or raw.title)
-            score = self._relevance_score(cleaned, raw.title or "")
-            if score < self._MIN_RELEVANCE_SCORE:
-                continue
             key = self._dedupe_key({"url": raw.url}, raw.title, raw.published_at)
             if key in seen:
                 continue
             seen.add(key)
             title_key = _title_key(raw.title or "")
-            # ponytail: O(n^2) over one period's records; fine for hundreds per hour.
-            if title_key and any(SequenceMatcher(None, title_key, kept).ratio() >= 0.85 for kept in kept_titles):
+            # ponytail: compares against the newest 200 kept titles only (rows are
+            # newest-first, so duplicates sit close together); keeps month cards
+            # O(200n) instead of O(n^2). Use a minhash index if that misses dupes.
+            if title_key and any(
+                SequenceMatcher(None, title_key, kept).ratio() >= 0.85 for kept in kept_titles[-200:]
+            ):
                 continue
             kept_titles.append(title_key)
             records.append(

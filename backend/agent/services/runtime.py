@@ -173,6 +173,10 @@ def run_worker(*, max_iterations: Optional[int] = None, sleep: Callable[[float],
     # ponytail: single worker assumed (one compose replica); add a Postgres
     # advisory lock if this ever runs with more than one replica.
     now = timezone.now()
+    # Runs left "running" by a killed worker would show as running forever.
+    AgentRun.objects.filter(status=AgentRun.STATUS_RUNNING).update(
+        status=AgentRun.STATUS_FAILED, ended_at=now, last_error="worker restarted mid-run"
+    )
     _worker_row()
     _update_worker(state="running", current_action="starting", started_at=now, heartbeat_at=now, iterations=0, last_error="")
     _log_loop_event("worker_started")

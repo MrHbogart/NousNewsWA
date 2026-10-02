@@ -104,17 +104,17 @@
                   stroke-width="1.2"
                   stroke-dasharray="4 4"
                 />
-                <text
-                  v-for="(guide, idx) in (currentSeriesData.priceLines || [])"
-                  v-if="guide && guide.kind !== 'last'"
-                  :key="`guide-label-${idx}`"
-                  :x="chartConfig.width - 6"
-                  :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
-                  text-anchor="end"
-                  :fill="guide.color"
-                >
-                  {{ guide.label }}
-                </text>
+                <template v-for="(guide, idx) in (currentSeriesData.priceLines || [])" :key="`guide-label-${idx}`">
+                  <text
+                    v-if="guide.kind !== 'last'"
+                    :x="chartConfig.width - 6"
+                    :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
+                    text-anchor="end"
+                    :fill="guide.color"
+                  >
+                    {{ guide.label }}
+                  </text>
+                </template>
                 <text
                   v-if="currentSeriesData.lastPriceLabel"
                   :x="chartConfig.width - 6"
@@ -196,10 +196,7 @@ const chartTransitionName = computed(() =>
   chartSwipeDirection.value === 'right' ? 'chart-swipe-right' : 'chart-swipe-left'
 )
 
-const showReadMore = computed(() => {
-  const summary = props.card.summary || ''
-  return summary.length > 280
-})
+const showReadMore = computed(() => Boolean(props.card.slug || props.card.id))
 
 const importanceScore = computed(() => normalizeImportanceScore(props.card.importance_score))
 
@@ -348,15 +345,14 @@ function formatTimeLabel(value) {
   return parts[1].slice(0, 5)
 }
 
+// UTC like the periods and chart axes; local time also differed between SSR and hydration.
 function formatTime(item) {
-  const value = item.hour_start || item.created_at
-  const date = new Date(value || '')
+  const date = new Date(item.hour_start || item.created_at || '')
   if (Number.isNaN(date.getTime())) return 'Just now'
-
-  const startHour = date.getHours().toString().padStart(2, '0')
-  const endHour = ((date.getHours() + 1) % 24).toString().padStart(2, '0')
-
-  return `${startHour}:00 - ${endHour}:00`
+  const day = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
+  const startHour = String(date.getUTCHours()).padStart(2, '0')
+  const endHour = String((date.getUTCHours() + 1) % 24).padStart(2, '0')
+  return `${day} · ${startHour}:00–${endHour}:00 UTC`
 }
 </script>
 

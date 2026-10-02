@@ -156,17 +156,17 @@
                       stroke-width="1.2"
                       stroke-dasharray="4 4"
                     />
-                    <text
-                      v-for="(guide, idx) in (chartDataSets[chartIndex]?.priceLines || [])"
-                      v-if="guide && guide.kind !== 'last'"
-                      :key="`guide-label-${chartIndex}-${idx}`"
-                      :x="chart.width - 6"
-                      :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
-                      text-anchor="end"
-                      :fill="guide.color"
-                    >
-                      {{ guide.label }}
-                    </text>
+                    <template v-for="(guide, idx) in (chartDataSets[chartIndex]?.priceLines || [])" :key="`guide-label-${idx}`">
+                      <text
+                        v-if="guide.kind !== 'last'"
+                        :x="chart.width - 6"
+                        :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
+                        text-anchor="end"
+                        :fill="guide.color"
+                      >
+                        {{ guide.label }}
+                      </text>
+                    </template>
                     <text
                       v-if="chartDataSets[chartIndex].lastPriceLabel"
                       :x="chart.width - 6"
@@ -381,8 +381,11 @@ const hasPendingArticleUpdate = computed(() => Boolean(pendingArticleUpdate.valu
 const articleRenderKey = computed(() => articleFingerprint(displayedArticle.value))
 const publishedLabel = computed(() => formatDate(displayedArticle.value?.hour_start))
 const updatedLabel = computed(() => formatDate(displayedArticle.value?.updated_at))
+const KIND_LABELS = { hour: 'Hourly market brief', day: 'Daily market brief', week: 'Weekly market brief', month: 'Monthly market brief' }
 const kindLabel = computed(() =>
-  displayedArticle.value?.kind === 'aftermath' ? 'Aftermath analysis' : 'Hourly market brief'
+  displayedArticle.value?.kind === 'aftermath'
+    ? 'Aftermath analysis'
+    : KIND_LABELS[displayedArticle.value?.timeframe] || 'Market brief'
 )
 const aftermathLink = computed(() => displayedArticle.value?.aftermath || null)
 const relatedLinks = computed(() => {
@@ -533,6 +536,8 @@ function formatDate(value) {
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZone: 'UTC',
+    timeZoneName: 'short',
   })
 }
 
