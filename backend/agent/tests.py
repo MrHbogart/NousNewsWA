@@ -11,7 +11,7 @@ from articles.models import AssetSeries, AssetCandle, Card, CardArticle, CardAss
 def _make_final_card(*, importance_score, period_end):
     period_start = period_end - timedelta(hours=1)
     card = Card.objects.create(
-        timeframe=Card.TIMEFRAME_HOUR,
+        timeframe=Card.TIMEFRAME_INTRADAY,
         period_start=period_start,
         period_end=period_end,
         status=Card.STATUS_FINAL,

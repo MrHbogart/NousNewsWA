@@ -429,14 +429,13 @@ class ContentMixin:
             if headline and not self._is_generic_title(headline):
                 return headline
 
-        if timeframe == Card.TIMEFRAME_HOUR:
-            return f"Financial Market Impact Update for {period_start.strftime('%Y-%m-%d %H:00 UTC')}"
-        if timeframe == Card.TIMEFRAME_DAY:
-            period_end = period_start + timedelta(hours=24)
+        if timeframe == Card.TIMEFRAME_INTRADAY:
+            period_end = period_start + timedelta(hours=4)
             return (
-                "24-Hour Financial Market Impact Summary ending "
-                f"{period_end.strftime('%Y-%m-%d %H:00 UTC')}"
+                f"Financial Market Impact Update, {period_start:%Y-%m-%d %H:00}–{period_end:%H:00} UTC"
             )
+        if timeframe == Card.TIMEFRAME_DAY:
+            return f"Daily Financial Market Impact Summary for {period_start:%A, %B %d, %Y}"
         if timeframe == Card.TIMEFRAME_WEEK:
             return f"Weekly Financial Market Impact Summary for Week of {period_start.strftime('%Y-%m-%d')}"
         return f"Monthly Financial Market Impact Summary for {period_start.strftime('%B %Y')}"

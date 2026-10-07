@@ -43,12 +43,36 @@ class PublicApiTests(TestCase):
         with self.assertRaises(IntegrityError):
             AssetCandle.objects.create(series=series, timestamp=ts, open=1, high=1, low=1, close=1)
 
-    def test_briefs_interleave_timeframes_by_recency(self):
-        day_start = (timezone.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
-        _card(Card.TIMEFRAME_HOUR, day_start + timedelta(hours=5), day_start + timedelta(hours=6), "older-hour")
-        _card(Card.TIMEFRAME_DAY, day_start, day_start + timedelta(days=1), "the-day")
+    def test_finalized_days_collapse_their_intraday_briefs(self):
+        today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        yesterday = today - timedelta(days=1)
+        _card(Card.TIMEFRAME_INTRADAY, yesterday + timedelta(hours=4), yesterday + timedelta(hours=8), "old-block")
+        _card(Card.TIMEFRAME_DAY, yesterday, today, "the-day")
+        _card(Card.TIMEFRAME_INTRADAY, today, today + timedelta(hours=4), "today-block")
         titles = [r["title"] for r in self.client.get("/api/briefs/").json()["results"]]
-        self.assertEqual(titles, ["the-day", "older-hour"])
+        self.assertEqual(titles, ["today-block", "the-day"])
+
+        sitemap = [r["slug"] for r in self.client.get("/api/sitemap/").json()["results"]]
+        self.assertNotIn("old-block", " ".join(sitemap))
+        self.assertEqual(len(sitemap), 2)
+
+        # The old block's page still works and points at its day article.
+        old = CardArticle.objects.get(title="old-block")
+        body = self.client.get(f"/api/articles/{old.slug}/").json()
+        self.assertEqual(body["day_article"]["title"], "the-day")
+
+    def test_intraday_brief_stays_until_its_day_is_finalized(self):
+        yesterday = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(days=1)
+        _card(Card.TIMEFRAME_INTRADAY, yesterday + timedelta(hours=20), yesterday + timedelta(hours=24), "late-block")
+        titles = [r["title"] for r in self.client.get("/api/briefs/").json()["results"]]
+        self.assertEqual(titles, ["late-block"])
+
+    def test_intraday_window_is_a_4_hour_block(self):
+        from articles.services import get_period_window
+
+        at = timezone.now().replace(hour=13, minute=37)
+        start, end = get_period_window(at, Card.TIMEFRAME_INTRADAY)
+        self.assertEqual((start.hour, start.minute, end - start), (12, 0, timedelta(hours=4)))
 
 
 class AgentConfigApiTests(TestCase):
@@ -104,7 +128,7 @@ class StreamTests(TransactionTestCase):
     async def test_article_stream_sends_article(self):
         now = timezone.now()
         card = await Card.objects.acreate(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=now, period_end=now + timedelta(hours=1),
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=now, period_end=now + timedelta(hours=1),
             status=Card.STATUS_FINAL, slug="c",
         )
         article = await CardArticle.objects.acreate(card=card, kind=CardArticle.KIND_MAIN, uuid=card.uuid, title="Hello")
@@ -150,7 +174,7 @@ class StreamTests(TransactionTestCase):
     async def _open_card(self):
         now = timezone.now()
         card = await Card.objects.acreate(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=now, period_end=now + timedelta(hours=1),
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=now, period_end=now + timedelta(hours=1),
             status=Card.STATUS_OPEN, slug="c",
         )
         article = await CardArticle.objects.acreate(card=card, kind=CardArticle.KIND_MAIN, uuid=card.uuid, title="Old")

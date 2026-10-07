@@ -350,9 +350,9 @@ function formatTime(item) {
   const date = new Date(item.hour_start || item.created_at || '')
   if (Number.isNaN(date.getTime())) return 'Just now'
   const day = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
-  const startHour = String(date.getUTCHours()).padStart(2, '0')
-  const endHour = String((date.getUTCHours() + 1) % 24).padStart(2, '0')
-  return `${day} · ${startHour}:00–${endHour}:00 UTC`
+  const end = new Date(item.period_end || date.getTime() + 4 * 3600 * 1000)
+  const hh = (d) => String(d.getUTCHours()).padStart(2, '0')
+  return `${day} · ${hh(date)}:00–${hh(end)}:00 UTC`
 }
 </script>
 

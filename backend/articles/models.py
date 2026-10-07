@@ -7,13 +7,13 @@ from articles.slugging import build_article_slug
 
 
 class Card(TimeStampedModel):
-    TIMEFRAME_HOUR = "hour"
+    TIMEFRAME_INTRADAY = "intraday"  # 4-hour block: 00, 04, ... 20 UTC
     TIMEFRAME_DAY = "day"
     TIMEFRAME_WEEK = "week"
     TIMEFRAME_MONTH = "month"
 
     TIMEFRAME_CHOICES = [
-        (TIMEFRAME_HOUR, "Hour"),
+        (TIMEFRAME_INTRADAY, "Intraday (4h)"),
         (TIMEFRAME_DAY, "Day"),
         (TIMEFRAME_WEEK, "Week"),
         (TIMEFRAME_MONTH, "Month"),

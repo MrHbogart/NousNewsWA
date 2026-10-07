@@ -1,7 +1,7 @@
 from rest_framework import serializers
 from bs4 import BeautifulSoup
 
-from articles.models import CardArticle
+from articles.models import Card, CardArticle
 from articles.slugging import build_article_slug
 from articles.services import aggregate_candles, enabled_price_source_labels, resolve_timeframe
 
@@ -168,6 +168,7 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
     related_articles = serializers.SerializerMethodField()
     article_content = serializers.SerializerMethodField()
     aftermath = serializers.SerializerMethodField()
+    day_article = serializers.SerializerMethodField()
 
     class Meta:
         model = CardArticle
@@ -193,6 +194,7 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
             "price_series",
             "related_articles",
             "aftermath",
+            "day_article",
             "created_at",
             "updated_at",
         ]
@@ -239,6 +241,22 @@ class CardArticleDetailSerializer(PriceSeriesMixin, serializers.ModelSerializer)
             "slug": aftermath["slug"],
             "title": aftermath["title"],
         }
+
+    def get_day_article(self, obj):
+        """The day article an intraday brief was folded into, once that day is finalized."""
+        if obj.card.timeframe != Card.TIMEFRAME_INTRADAY:
+            return None
+        return (
+            CardArticle.objects.filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=Card.TIMEFRAME_DAY,
+                card__status=Card.STATUS_FINAL,
+                card__period_start__lte=obj.card.period_start,
+                card__period_end__gt=obj.card.period_start,
+            )
+            .values("slug", "title")
+            .first()
+        )
 
     def get_related_articles(self, obj):
         related_qs = (

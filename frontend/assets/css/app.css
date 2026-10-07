@@ -645,3 +645,39 @@ body {
     transform: translateY(0);
   }
 }
+
+/* Static text pages: about, privacy, disclaimer, contact, errors. */
+.prose-page {
+  max-width: 68ch;
+  padding: 32px 0 48px;
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--ink);
+}
+
+.prose-page h1 {
+  margin: 0 0 16px;
+  font-size: 28px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.prose-page h2 {
+  margin: 32px 0 8px;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.prose-page p,
+.prose-page ul {
+  margin: 0 0 14px;
+}
+
+.prose-page a {
+  color: var(--accent);
+}
+
+.prose-page .prose-meta {
+  font-size: 13px;
+  color: var(--ink-soft);
+}

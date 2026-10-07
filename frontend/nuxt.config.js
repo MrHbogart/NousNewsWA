@@ -21,6 +21,8 @@ export default defineNuxtConfig({
     public: {
       apiBaseUrl: 'http://127.0.0.1:8081/api',
       siteDomain: 'http://127.0.0.1:3001',
+      // Shown on /contact; set NUXT_PUBLIC_CONTACT_EMAIL.
+      contactEmail: '',
     },
   },
   routeRules: {
@@ -41,11 +43,17 @@ export default defineNuxtConfig({
       meta: [
         {
           name: 'description',
-          content: 'NousNews delivers curated, agent-driven reporting from the sources that matter.',
+          content: 'Market news every 4 hours: what happened and how prices reacted.',
         },
+        { name: 'theme-color', content: '#0b0d10' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
-      link: [{ rel: 'alternate', type: 'application/rss+xml', title: 'NousNews', href: '/rss.xml' }],
+      link: [
+        { rel: 'alternate', type: 'application/rss+xml', title: 'NousNews', href: '/rss.xml' },
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'icon', type: 'image/png', sizes: '48x48', href: '/favicon-48.png' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+      ],
     },
   },
   postcss: {

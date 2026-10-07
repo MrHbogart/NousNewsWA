@@ -161,6 +161,22 @@ to a fresh `0001_initial` per app (data was disposable).
   were local while periods and chart axes are UTC (also an SSR hydration
   mismatch) — now UTC throughout.
 
+## Intraday/SEO pass (2026-10-07)
+
+- **Hourly cards became 4-hour intraday cards** (`Card.TIMEFRAME_INTRADAY`,
+  `articles/0002` relabels old `hour` rows so their URLs keep working). A
+  migrated 1-hour card is rebuilt as its 4-hour block (`period_end` check in
+  `_finalize_due_cards`/`_due_period_starts`). The hourly finalizer was
+  folded into `_finalize_due_cards`, which now loops intraday/day/week/month;
+  `AGENT_MAX_HOURLY_BACKFILL_HOURS` is gone (backfill is the last
+  `AGENT_MAX_AGGREGATE_BACKFILL_PERIODS` periods for every timeframe).
+  Intraday aftermaths still use `AgentConfig.aftermath_delay_hour_minutes`.
+- **SEO**: missing articles returned 200 (soft 404) — now 404/503; the
+  sitemap held only the newest 100 briefs — now every indexable article via
+  `/api/sitemap/`, and 503 while the API is down; added home `<h1>`,
+  favicons, `og:image`, `NewsArticle` JSON-LD, and About/Disclaimer/
+  Privacy/Contact pages (AdSense prerequisites).
+
 ## Open — flagged, not changed
 
 - **No paid/maintained price provider yet.** yfinance and Binance (via ccxt)

@@ -1,13 +1,13 @@
 # NousNews
 
-Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a agent pipeline that builds hourly briefs from curated sources.
+Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and a agent pipeline that builds a market brief every 4 hours, and one article per day, from curated sources.
 
 ## Features
 
 - Nuxt 3 SSR frontend with Tailwind styling
 - Django REST Framework API
 - Postgres-backed agent, seeds, logs, and exports
-- Hourly briefs and headline summaries
+- 4-hour intraday briefs, folded into one article per day once the day closes
 - Docker-first deployment with health checks
 
 ## Project structure
@@ -133,15 +133,18 @@ Base URL: `/api` (see `backend/config/urls.py` for the top-level include list).
 Articles and briefs (`backend/articles/urls.py`):
 - `GET /health/` — always 200 while the API is up; `agent` reports whether
   the worker is alive and when it last ran news/price syncs
-- `GET /lasthour/`
+- `GET /lasthour/` — the current 4-hour intraday brief (open), else the latest final one
 - `GET /briefs/?page=0&limit=10` — final briefs of every timeframe, newest
-  period end first
+  period end first; intraday briefs of days that already have a final day
+  article are left out (the day article replaces them)
+- `GET /sitemap/` — `{slug, updated_at}` of every indexable article (the
+  same set plus aftermaths), for the frontend's `/sitemap.xml`
 - `GET /articles/{uuid-or-slug}/`
 
 Live updates (Server-Sent Events, `backend/articles/stream.py`):
 - `GET /stream/home/` — `event: home` with `{lasthour, briefs}` on connect
   and whenever content changes; `event: prices` with `{id, price_series}`
-  for the current hour's brief on every price tick; `: ping` every 15s
+  for the current intraday brief on every price tick; `: ping` every 15s
 - `GET /stream/articles/{uuid-or-slug}/` — `event: article` on connect and
   on change; `event: prices` for that article's charts on every price tick
 - Both are pushed via Postgres `LISTEN/NOTIFY` (well under a second after a
@@ -163,7 +166,8 @@ Prices (`backend/prices/urls.py`, mounted at `/api/prices/`):
 - `GET /series/`
 - `GET /series/{symbol}/latest/`
 
-Frontend server routes: `/sitemap.xml`, `/rss.xml`, `/robots.txt`.
+Frontend server routes: `/sitemap.xml`, `/rss.xml`, `/robots.txt`. Static
+pages: `/about`, `/disclaimer`, `/privacy`, `/contact` (`NUXT_PUBLIC_CONTACT_EMAIL`).
 
 ## Agent worker and commands
 

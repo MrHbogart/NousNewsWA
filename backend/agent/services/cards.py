@@ -22,22 +22,21 @@ def _title_key(title: str) -> str:
 class CardsMixin:
     """Card/period lifecycle: loading raw records for a window and upserting Card/CardArticle/CardAsset."""
 
-    def _refresh_current_hour_card(self, run: AgentRun, now: datetime) -> None:
-        period_start = now.replace(minute=0, second=0, microsecond=0)
-        period_end = period_start + timedelta(hours=1)
+    def _refresh_current_intraday_card(self, run: AgentRun, now: datetime) -> None:
+        period_start, period_end = get_period_window(now, Card.TIMEFRAME_INTRADAY)
 
         existing = Card.objects.filter(
-            timeframe=Card.TIMEFRAME_HOUR,
+            timeframe=Card.TIMEFRAME_INTRADAY,
             period_start=period_start,
         ).first()
-        if existing and existing.status == Card.STATUS_FINAL:
+        if existing and existing.status == Card.STATUS_FINAL and existing.period_end == period_end:
             return
 
         records = self._load_raw_records(period_start, min(now, period_end))
         if not records:
             return
 
-        card = self._get_or_create_open_card_for_period(Card.TIMEFRAME_HOUR, period_start, period_end)
+        card = self._get_or_create_open_card_for_period(Card.TIMEFRAME_INTRADAY, period_start, period_end)
         source_label = ", ".join(dict.fromkeys([r.get("source_name") or "" for r in records if r.get("source_name")]))[:255]
         published_at = max((r.get("published_at") for r in records if r.get("published_at")), default=now)
         if existing and existing.status == Card.STATUS_OPEN:
@@ -47,7 +46,7 @@ class CardsMixin:
                 self._log_event(
                     run=run,
                     step=AgentLogEvent.STEP_CARD_GENERATION,
-                    message="current_hour_card_unchanged_skipped",
+                    message="current_intraday_card_unchanged_skipped",
                     metadata={
                         "period_start": period_start,
                         "period_end": period_end,
@@ -59,7 +58,7 @@ class CardsMixin:
 
         main_payload = self._build_main_payload(
             records=records,
-            timeframe=Card.TIMEFRAME_HOUR,
+            timeframe=Card.TIMEFRAME_INTRADAY,
             period_start=period_start,
             period_end=period_end,
             run=run,
@@ -99,7 +98,7 @@ class CardsMixin:
         self._log_event(
             run=run,
             step=AgentLogEvent.STEP_CARD_GENERATION,
-            message="current_hour_card_refreshed",
+            message="current_intraday_card_refreshed",
             metadata={
                 "period_start": period_start,
                 "period_end": period_end,
@@ -111,98 +110,10 @@ class CardsMixin:
             },
         )
 
-    def _finalize_due_hourly_cards(self, run: AgentRun, now: datetime) -> int:
-        latest_closed_start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=1)
-        if latest_closed_start.year < 2000:
-            return 0
-
-        starts = self._due_period_starts(Card.TIMEFRAME_HOUR, latest_closed_start)
-        if not starts:
-            self._log_event(
-                run=run,
-                step=AgentLogEvent.STEP_CARD_GENERATION,
-                message="no_due_hourly_periods",
-                metadata={"latest_closed_start": latest_closed_start},
-            )
-            return 0
-
-        finalized = 0
-        for period_start in starts:
-            period_end = period_start + timedelta(hours=1)
-            existing = Card.objects.filter(
-                timeframe=Card.TIMEFRAME_HOUR,
-                period_start=period_start,
-                status=Card.STATUS_FINAL,
-            ).first()
-            if existing and existing.articles.filter(kind=CardArticle.KIND_MAIN).exists():
-                continue
-
-            records = self._load_raw_records(period_start, period_end)
-            if not records:
-                continue
-
-            card = self._get_or_create_card_for_period(Card.TIMEFRAME_HOUR, period_start, period_end)
-            source_label = ", ".join(dict.fromkeys([r.get("source_name") or "" for r in records if r.get("source_name")]))[:255]
-            published_at = max((r.get("published_at") for r in records if r.get("published_at")), default=period_end)
-            main_payload = self._build_main_payload(
-                records=records,
-                timeframe=Card.TIMEFRAME_HOUR,
-                period_start=period_start,
-                period_end=period_end,
-                run=run,
-            )
-            side_payloads = self._build_side_articles(records)
-            # One transaction: SSE readers never see new articles on a stale card.
-            with transaction.atomic():
-                card.published_at = published_at
-                self._upsert_card_articles(card=card, main_payload=main_payload, side_payloads=side_payloads)
-
-                card.title = main_payload["title"]
-                card.summary = main_payload["summary"]
-                card.body = main_payload["body"]
-                card.references = main_payload["references"]
-                card.importance_score = main_payload["importance_score"]
-                card.importance_reason = main_payload["importance_reason"]
-                card.source_name = source_label
-                card.published_at = published_at
-                card.article_count = len(records)
-                card.status = Card.STATUS_FINAL
-                card.save(
-                    update_fields=[
-                        "title",
-                        "summary",
-                        "body",
-                        "references",
-                        "importance_score",
-                        "importance_reason",
-                        "source_name",
-                        "published_at",
-                        "article_count",
-                        "status",
-                    ]
-                )
-                self._ensure_card_assets(card)
-            finalized += 1
-
-            self._log_event(
-                run=run,
-                step=AgentLogEvent.STEP_CARD_GENERATION,
-                message="hourly_card_finalized",
-                metadata={
-                    "period_start": period_start,
-                    "period_end": period_end,
-                    "item_count": len(records),
-                    "card_slug": card.slug,
-                    "article_slug": main_payload.get("slug"),
-                    "title": card.title,
-                },
-            )
-
-        return finalized
-
-    def _finalize_due_aggregate_cards(self, run: AgentRun, now: datetime) -> int:
+    def _finalize_due_cards(self, run: AgentRun, now: datetime) -> int:
+        """Finalize every closed intraday/day/week/month period that has no main article yet."""
         total_finalized = 0
-        for timeframe in (Card.TIMEFRAME_DAY, Card.TIMEFRAME_WEEK, Card.TIMEFRAME_MONTH):
+        for timeframe in (Card.TIMEFRAME_INTRADAY, Card.TIMEFRAME_DAY, Card.TIMEFRAME_WEEK, Card.TIMEFRAME_MONTH):
             latest_closed_start = self._latest_closed_period_start(timeframe, now)
             if latest_closed_start is None:
                 continue
@@ -214,7 +125,12 @@ class CardsMixin:
                     period_start=period_start,
                     status=Card.STATUS_FINAL,
                 ).first()
-                if existing and existing.articles.filter(kind=CardArticle.KIND_MAIN).exists():
+                # period_end check: legacy 1-hour cards migrated to intraday get rebuilt as 4h blocks.
+                if (
+                    existing
+                    and existing.period_end == period_end
+                    and existing.articles.filter(kind=CardArticle.KIND_MAIN).exists()
+                ):
                     continue
 
                 records = self._load_raw_records(period_start, period_end)
@@ -271,12 +187,11 @@ class CardsMixin:
                 self._log_event(
                     run=run,
                     step=AgentLogEvent.STEP_CARD_GENERATION,
-                    message="aggregate_card_finalized",
+                    message="card_finalized",
                     metadata={
                         "timeframe": timeframe,
                         "period_start": period_start,
                         "period_end": period_end,
-                        "hourly_records": len(records),
                         "source_items": total_items,
                         "card_slug": card.slug,
                         "article_slug": main_payload.get("slug"),
@@ -288,7 +203,7 @@ class CardsMixin:
 
     def _aftermath_delay_minutes(self, timeframe: str) -> int:
         return {
-            Card.TIMEFRAME_HOUR: self.config.aftermath_delay_hour_minutes,
+            Card.TIMEFRAME_INTRADAY: self.config.aftermath_delay_hour_minutes,
             Card.TIMEFRAME_DAY: self.config.aftermath_delay_day_minutes,
             Card.TIMEFRAME_WEEK: self.config.aftermath_delay_week_minutes,
             Card.TIMEFRAME_MONTH: self.config.aftermath_delay_month_minutes,
@@ -358,37 +273,20 @@ class CardsMixin:
             .first()
         )
         if last_final:
-            cursor = self._next_period_start(timeframe, last_final.period_start)
+            start, end = get_period_window(last_final.period_start, timeframe)
+            # A migrated 1-hour card doesn't cover its 4-hour block: rebuild that block.
+            cursor = end if last_final.period_end == end else start
         else:
-            if timeframe == Card.TIMEFRAME_HOUR:
-                earliest = RawNewsItem.objects.filter(published_at__isnull=False).order_by("published_at").first()
-                if not earliest or not earliest.published_at:
-                    return []
-                cursor = earliest.published_at.replace(minute=0, second=0, microsecond=0)
-            else:
-                earliest_hour = (
-                    Card.objects.filter(timeframe=Card.TIMEFRAME_HOUR, status=Card.STATUS_FINAL)
-                    .order_by("period_start")
-                    .first()
-                )
-                if earliest_hour is None:
-                    earliest_hour = Card.objects.filter(timeframe=Card.TIMEFRAME_HOUR).order_by("period_start").first()
-                if not earliest_hour:
-                    return []
-                cursor, _ = get_period_window(earliest_hour.period_start, timeframe)
-
-        if timeframe == Card.TIMEFRAME_HOUR:
-            lower_bound = latest_closed_start - timedelta(hours=max(1, self._MAX_HOURLY_BACKFILL_HOURS - 1))
-            if cursor < lower_bound:
-                cursor = lower_bound
+            earliest = RawNewsItem.objects.filter(published_at__isnull=False).order_by("published_at").first()
+            if not earliest:
+                return []
+            cursor, _ = get_period_window(earliest.published_at, timeframe)
 
         starts = []
         while cursor <= latest_closed_start:
             starts.append(cursor)
             cursor = self._next_period_start(timeframe, cursor)
-        if timeframe != Card.TIMEFRAME_HOUR and len(starts) > self._MAX_AGGREGATE_BACKFILL_PERIODS:
-            starts = starts[-self._MAX_AGGREGATE_BACKFILL_PERIODS :]
-        return starts
+        return starts[-self._MAX_AGGREGATE_BACKFILL_PERIODS :]
 
     def _latest_closed_period_start(self, timeframe: str, now: datetime) -> Optional[datetime]:
         current_start, _ = get_period_window(now, timeframe)
@@ -437,8 +335,8 @@ class CardsMixin:
         return card
 
     def _card_slug(self, timeframe: str, start: datetime) -> str:
-        if timeframe == Card.TIMEFRAME_HOUR:
-            return start.strftime("hour-%Y-%m-%d-%H")
+        if timeframe == Card.TIMEFRAME_INTRADAY:
+            return start.strftime("intraday-%Y-%m-%d-%H")
         if timeframe == Card.TIMEFRAME_DAY:
             return start.strftime("day-%Y-%m-%d")
         if timeframe == Card.TIMEFRAME_WEEK:

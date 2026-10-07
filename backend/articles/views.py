@@ -1,7 +1,6 @@
-from datetime import timedelta
 from uuid import UUID
 
-from django.db.models import Case, IntegerField, Value, When
+from django.db.models import Case, IntegerField, Max, Value, When
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.response import Response
@@ -9,6 +8,7 @@ from rest_framework.views import APIView
 
 from agent.services.runtime import worker_status
 from articles.models import Card, CardArticle
+from articles.services import get_period_window
 from articles.serializers import (
     CardArticleDetailSerializer,
     CardArticleListSerializer,
@@ -35,46 +35,29 @@ class HealthView(APIView):
 
 
 def last_hour_payload() -> dict:
-    """The open current-hour brief, else the latest final one, else a placeholder."""
+    """The open current intraday brief, else the latest final one, else a placeholder."""
     now = timezone.now()
-    current_hour_start = now.replace(minute=0, second=0, microsecond=0)
-
-    current_open_article = (
-        CardArticle.objects.select_related("card")
-        .filter(
-            kind=CardArticle.KIND_MAIN,
-            card__timeframe=Card.TIMEFRAME_HOUR,
-            card__period_start=current_hour_start,
-            card__status=Card.STATUS_OPEN,
-        )
-        .order_by("-updated_at")
-        .first()
+    block_start, block_end = get_period_window(now, Card.TIMEFRAME_INTRADAY)
+    intraday = CardArticle.objects.select_related("card").filter(
+        kind=CardArticle.KIND_MAIN, card__timeframe=Card.TIMEFRAME_INTRADAY
     )
-    if current_open_article:
-        return CardArticleDetailSerializer(current_open_article).data
 
     article = (
-        CardArticle.objects.select_related("card")
-        .filter(
-            kind=CardArticle.KIND_MAIN,
-            card__timeframe=Card.TIMEFRAME_HOUR,
-            card__status=Card.STATUS_FINAL,
-        )
-        .order_by("-card__period_start")
-        .first()
+        intraday.filter(card__period_start=block_start, card__status=Card.STATUS_OPEN).order_by("-updated_at").first()
+        or intraday.filter(card__status=Card.STATUS_FINAL).order_by("-card__period_start").first()
     )
     if article:
         return CardArticleDetailSerializer(article).data
-    fallback = {
+    return {
         "id": None,
-        "timeframe": Card.TIMEFRAME_HOUR,
-        "period_start": now.replace(minute=0, second=0, microsecond=0),
-        "period_end": (now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)),
-        "hour_start": now.replace(minute=0, second=0, microsecond=0),
+        "timeframe": Card.TIMEFRAME_INTRADAY,
+        "period_start": block_start,
+        "period_end": block_end,
+        "hour_start": block_start,
         "published_at": None,
         "slug": "",
         "title": "Awaiting Next Finalized Financial Market Brief",
-        "summary": "No finalized high-impact financial updates were published for the latest closed hour yet.",
+        "summary": "No finalized high-impact financial updates were published for the latest closed period yet.",
         "article_content": "",
         "impacts": [],
         "references": [],
@@ -86,10 +69,10 @@ def last_hour_payload() -> dict:
         "is_daily_summary": False,
         "price_series": [],
         "related_articles": [],
+        "day_article": None,
         "created_at": now,
         "updated_at": now,
     }
-    return fallback
 
 
 class LastHourView(APIView):
@@ -100,17 +83,32 @@ class LastHourView(APIView):
         return Response(last_hour_payload())
 
 
+def _collapsed_day_end():
+    """End of the latest finalized day card: intraday briefs before it are folded into day articles."""
+    return Card.objects.filter(timeframe=Card.TIMEFRAME_DAY, status=Card.STATUS_FINAL).aggregate(
+        end=Max("period_end")
+    )["end"]
+
+
+def visible_final_articles(kinds=(CardArticle.KIND_MAIN,)):
+    """Final articles a reader (or crawler) should see: old days show as one day article each."""
+    qs = CardArticle.objects.select_related("card").filter(kind__in=kinds, card__status=Card.STATUS_FINAL)
+    day_end = _collapsed_day_end()
+    if day_end:
+        qs = qs.exclude(kind=CardArticle.KIND_MAIN, card__timeframe=Card.TIMEFRAME_INTRADAY, card__period_start__lt=day_end)
+    return qs
+
+
 def briefs_payload(page: int = 0, limit: int = 10) -> dict:
     limit = max(1, min(limit, 100))
     page = max(page, 0)
     # Newest period end first; when periods end together the wider timeframe
-    # (month > week > day > hour) comes first.
+    # (month > week > day > intraday) comes first.
     all_articles = (
-        CardArticle.objects.select_related("card")
-        .filter(kind=CardArticle.KIND_MAIN, card__status=Card.STATUS_FINAL)
+        visible_final_articles()
         .annotate(
             timeframe_order=Case(
-                When(card__timeframe=Card.TIMEFRAME_HOUR, then=Value(1)),
+                When(card__timeframe=Card.TIMEFRAME_INTRADAY, then=Value(1)),
                 When(card__timeframe=Card.TIMEFRAME_DAY, then=Value(2)),
                 When(card__timeframe=Card.TIMEFRAME_WEEK, then=Value(3)),
                 When(card__timeframe=Card.TIMEFRAME_MONTH, then=Value(4)),
@@ -140,6 +138,25 @@ class BriefListView(APIView):
         except (ValueError, TypeError):
             page, limit = 0, 10
         return Response(briefs_payload(page, limit))
+
+
+def sitemap_payload() -> list[dict]:
+    # ponytail: one flat list, capped at the sitemap protocol's 50k URLs; add a sitemap index past that.
+    rows = (
+        visible_final_articles(kinds=(CardArticle.KIND_MAIN, CardArticle.KIND_AFTERMATH))
+        .exclude(slug="")
+        .order_by("-card__period_end")
+        .values("slug", "updated_at")[:50000]
+    )
+    return list(rows)
+
+
+class SitemapView(APIView):
+    authentication_classes = []
+    permission_classes = []
+
+    def get(self, request):
+        return Response({"results": sitemap_payload()})
 
 
 def article_payload(pk: str) -> dict | None:

@@ -68,7 +68,6 @@ class AgentServiceCore:
     """
 
     _MIN_RELEVANCE_SCORE = int(getattr(settings, "AGENT_MIN_RELEVANCE_SCORE", 4))
-    _MAX_HOURLY_BACKFILL_HOURS = int(getattr(settings, "AGENT_MAX_HOURLY_BACKFILL_HOURS", 72))
     _AFTERMATH_MAX_AGE_DAYS = int(getattr(settings, "AGENT_AFTERMATH_MAX_AGE_DAYS", 7))
     _MAX_AGGREGATE_BACKFILL_PERIODS = int(getattr(settings, "AGENT_MAX_AGGREGATE_BACKFILL_PERIODS", 16))
     _LLM_FILTER_SCORE_BUFFER = int(getattr(settings, "AGENT_LLM_FILTER_SCORE_BUFFER", 2))
@@ -87,6 +86,7 @@ class AgentServiceCore:
         "daily-market-summary",
         "daily-market-brief",
         "hourly-market-brief",
+        "intraday-market-brief",
         "financial-brief",
         "financial-market-brief",
         "news-brief",
@@ -159,12 +159,11 @@ class AgentServiceCore:
 
             now = _utc_now()
             # Permanent cards first so they get the LLM budget; the open
-            # current-hour card is refreshed with whatever is left.
-            hourly_created = self._finalize_due_hourly_cards(run, now)
-            aggregate_created = self._finalize_due_aggregate_cards(run, now)
+            # current intraday card is refreshed with whatever is left.
+            cards_created = self._finalize_due_cards(run, now)
             aftermath_created = self._finalize_due_aftermath_cards(run, now)
-            self._refresh_current_hour_card(run, now)
-            stats.articles_created = hourly_created + aggregate_created + aftermath_created
+            self._refresh_current_intraday_card(run, now)
+            stats.articles_created = cards_created + aftermath_created
 
             run.status = AgentRun.STATUS_DONE
 
@@ -180,8 +179,7 @@ class AgentServiceCore:
                     "raw_items_saved": fetch_stats.items_saved,
                     "raw_items_rejected": fetch_stats.items_rejected,
                     "cards_finalized": stats.articles_created,
-                    "hourly_cards_finalized": hourly_created,
-                    "aggregate_cards_finalized": aggregate_created,
+                    "period_cards_finalized": cards_created,
                     "aftermath_cards_finalized": aftermath_created,
                     "llm_requests_used": self.llm_requests_used,
                     "llm_request_budget": self.llm_request_budget,

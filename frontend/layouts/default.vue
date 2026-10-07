@@ -6,7 +6,7 @@
     <!-- Fixed header -->
     <header class="app-header" :class="{ 'is-scrolled': isHeaderScrolled }">
       <div class="app-shell">
-        <div class="app-brand">NousNews</div>
+        <NuxtLink to="/" class="app-brand">NousNews</NuxtLink>
       </div>
     </header>
 
@@ -15,6 +15,18 @@
       <div class="app-shell">
         <slot />
       </div>
+      <footer class="app-footer">
+        <div class="app-shell">
+          <nav aria-label="Site">
+            <NuxtLink to="/about">About</NuxtLink>
+            <NuxtLink to="/disclaimer">Disclaimer</NuxtLink>
+            <NuxtLink to="/privacy">Privacy</NuxtLink>
+            <NuxtLink to="/contact">Contact</NuxtLink>
+            <a href="/rss.xml">RSS</a>
+          </nav>
+          <p>NousNews is for information only and is not financial advice.</p>
+        </div>
+      </footer>
     </main>
   </div>
 </template>
@@ -77,6 +89,33 @@ function onScroll(e) {
   font-size: 18px;
   font-weight: 600;
   letter-spacing: 0.01em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-footer {
+  border-top: 1px solid var(--line);
+  padding: 24px 0 40px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.app-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+
+.app-footer a {
+  color: inherit;
+}
+
+.app-footer a:hover {
+  color: var(--ink);
+}
+
+.app-footer p {
+  margin: 12px 0 0;
 }
 
 .app-meta {

@@ -43,6 +43,16 @@
         </div>
       </Transition>
 
+      <div
+        v-if="displayedArticle?.day_article"
+        class="rounded-xl border border-ink-900/10 bg-white px-4 py-3 text-sm text-ink-700"
+      >
+        This 4-hour brief is part of the full day's article:
+        <NuxtLink :to="`/articles/${displayedArticle.day_article.slug}`" class="font-medium text-ink-900 underline">
+          {{ displayedArticle.day_article.title || 'Read the whole day' }}
+        </NuxtLink>
+      </div>
+
       <Transition name="article-fade" mode="out-in">
         <div :key="articleRenderKey" class="article-stack">
       <div class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
@@ -311,6 +321,16 @@ const { data: articleData, pending, error, refresh: refreshArticle } = await use
   () => api.getArticle(articleId.value)
 )
 
+// A real 404/503 status for crawlers instead of a 200 page with an error message.
+if (error.value) {
+  const notFound = error.value.statusCode === 404
+  throw createError({
+    statusCode: notFound ? 404 : 503,
+    statusMessage: notFound ? 'Report not found' : 'Report temporarily unavailable',
+    fatal: true,
+  })
+}
+
 watch(articleId, () => {
   refreshArticle()
 })
@@ -381,7 +401,7 @@ const hasPendingArticleUpdate = computed(() => Boolean(pendingArticleUpdate.valu
 const articleRenderKey = computed(() => articleFingerprint(displayedArticle.value))
 const publishedLabel = computed(() => formatDate(displayedArticle.value?.hour_start))
 const updatedLabel = computed(() => formatDate(displayedArticle.value?.updated_at))
-const KIND_LABELS = { hour: 'Hourly market brief', day: 'Daily market brief', week: 'Weekly market brief', month: 'Monthly market brief' }
+const KIND_LABELS = { intraday: '4-hour market brief', day: 'Daily market brief', week: 'Weekly market brief', month: 'Monthly market brief' }
 const kindLabel = computed(() =>
   displayedArticle.value?.kind === 'aftermath'
     ? 'Aftermath analysis'
@@ -541,36 +561,43 @@ function formatDate(value) {
   })
 }
 
+const siteUrl = config.public.siteDomain.replace(/\/$/, '')
+const articleUrl = computed(() => `${siteUrl}/articles/${displayedArticle.value?.slug || articleId.value}`)
+const metaDescription = computed(() => cleanSummary.value.slice(0, 160) || 'NousNews market report.')
+
+// schema.org NewsArticle; "<" escaped so article text can't close the script tag.
+const jsonLd = computed(() => {
+  const article = displayedArticle.value
+  if (!article?.id) return ''
+  const publisher = { '@type': 'Organization', name: 'NousNews', url: siteUrl }
+  return JSON.stringify({
+    '@context': 'https://schema.org',
+    '@type': 'NewsArticle',
+    headline: article.title,
+    description: metaDescription.value,
+    url: articleUrl.value,
+    mainEntityOfPage: articleUrl.value,
+    image: [`${siteUrl}/og-image.png`],
+    datePublished: article.published_at || article.period_end || article.created_at,
+    dateModified: article.updated_at,
+    author: publisher,
+    publisher: { ...publisher, logo: { '@type': 'ImageObject', url: `${siteUrl}/icon-512.png` } },
+  }).replace(/</g, '\\u003c')
+})
+
 useHead(() => ({
-  title: displayedArticle.value?.title ? `NousNews · ${displayedArticle.value.title}` : 'NousNews · Report',
+  title: displayedArticle.value?.title ? `${displayedArticle.value.title} · NousNews` : 'NousNews · Report',
   meta: [
-    {
-      name: 'description',
-      content: displayedArticle.value?.summary
-        ? displayedArticle.value.summary.slice(0, 160)
-        : 'NousNews report details.',
-    },
+    { name: 'description', content: metaDescription.value },
+    // Folded into a day article: keep the page reachable but out of the index.
+    ...(displayedArticle.value?.day_article ? [{ name: 'robots', content: 'noindex, follow' }] : []),
     { property: 'og:title', content: displayedArticle.value?.title || 'NousNews report' },
-    {
-      property: 'og:description',
-      content: displayedArticle.value?.summary
-        ? displayedArticle.value.summary.slice(0, 160)
-        : 'NousNews report details.',
-    },
+    { property: 'og:description', content: metaDescription.value },
     { property: 'og:type', content: 'article' },
-    { property: 'og:site_name', content: 'NousNews' },
-    { name: 'twitter:card', content: 'summary' },
-    {
-      property: 'og:url',
-      content: `${config.public.siteDomain.replace(/\/$/, '')}/articles/${displayedArticle.value?.slug || articleId.value}`,
-    },
+    { property: 'og:url', content: articleUrl.value },
   ],
-  link: [
-    {
-      rel: 'canonical',
-      href: `${config.public.siteDomain.replace(/\/$/, '')}/articles/${displayedArticle.value?.slug || articleId.value}`,
-    },
-  ],
+  link: [{ rel: 'canonical', href: articleUrl.value }],
+  script: jsonLd.value ? [{ type: 'application/ld+json', innerHTML: jsonLd.value }] : [],
 }))
 </script>
 

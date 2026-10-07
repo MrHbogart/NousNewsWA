@@ -45,13 +45,12 @@ class PipelineCorrectnessTests(TestCase):
         calls = []
         stats = mock.Mock(sources_processed=0, items_seen=0, items_saved=0, items_rejected=0)
         with mock.patch.object(service, "_fetch_and_store_sources", return_value=stats), \
-             mock.patch.object(service, "_finalize_due_hourly_cards", side_effect=lambda *a: calls.append("hourly") or 0), \
-             mock.patch.object(service, "_finalize_due_aggregate_cards", side_effect=lambda *a: calls.append("aggregate") or 0), \
+             mock.patch.object(service, "_finalize_due_cards", side_effect=lambda *a: calls.append("final") or 0), \
              mock.patch.object(service, "_finalize_due_aftermath_cards", side_effect=lambda *a: calls.append("aftermath") or 0), \
-             mock.patch.object(service, "_refresh_current_hour_card", side_effect=lambda *a: calls.append("open_hour")):
+             mock.patch.object(service, "_refresh_current_intraday_card", side_effect=lambda *a: calls.append("open")):
             run = service.run()
         self.assertEqual(run.status, AgentRun.STATUS_DONE, run.last_error)
-        self.assertEqual(calls, ["hourly", "aggregate", "aftermath", "open_hour"])
+        self.assertEqual(calls, ["final", "aftermath", "open"])
 
 
 class AgentWorkerTests(TestCase):
@@ -135,7 +134,7 @@ class CardLifecycleTests(TestCase):
 
         start = period_end - timedelta(hours=1)
         card = Card.objects.create(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=start, period_end=period_end,
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=start, period_end=period_end,
             status=Card.STATUS_FINAL, slug=f"hour-{start:%Y%m%d%H%M}", importance_score=3,
         )
         CardArticle.objects.create(card=card, kind=CardArticle.KIND_MAIN, uuid=card.uuid, title="T", summary="S", body="B")
@@ -153,7 +152,7 @@ class CardLifecycleTests(TestCase):
 
         start = self.now.replace(minute=0, second=0, microsecond=0)
         card = Card.objects.create(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=start, period_end=start + timedelta(hours=1),
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=start, period_end=start + timedelta(hours=1),
             status=Card.STATUS_OPEN, slug="hour-open",
         )
         payload = {"title": "First headline", "summary": "", "body": "", "references": [], "impacts": []}
@@ -169,7 +168,7 @@ class CardLifecycleTests(TestCase):
 
         start = self.now.replace(minute=0, second=0, microsecond=0)
         card = Card.objects.create(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=start, period_end=start + timedelta(hours=1),
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=start, period_end=start + timedelta(hours=1),
             status=Card.STATUS_OPEN, slug="hour-open",
         )
         main = {"title": "Headline", "summary": "", "body": "", "references": [], "impacts": []}
@@ -200,7 +199,7 @@ class CardLifecycleTests(TestCase):
                 content=RELEVANT_TEXT, cleaned_text=RELEVANT_TEXT, published_at=yesterday + timedelta(minutes=i),
             )
         Card.objects.create(
-            timeframe=Card.TIMEFRAME_HOUR, period_start=yesterday, period_end=yesterday + timedelta(hours=1),
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=yesterday, period_end=yesterday + timedelta(hours=1),
             status=Card.STATUS_FINAL, slug="hour-y",
         )
 
@@ -213,6 +212,12 @@ class CardLifecycleTests(TestCase):
         card = day_cards.get()
         self.assertEqual(card.slug, f"day-{yesterday:%Y-%m-%d}")
         self.assertEqual(card.status, Card.STATUS_FINAL)
+
+        # The migrated 1-hour card at 12:00 was rebuilt as the 12:00-16:00 block.
+        block = Card.objects.get(timeframe=Card.TIMEFRAME_INTRADAY, period_start=yesterday)
+        self.assertEqual(block.period_end, yesterday + timedelta(hours=4))
+        self.assertEqual(block.status, Card.STATUS_FINAL)
+        self.assertTrue(block.articles.filter(kind="main").exists())
 
 
 class LlmAndPriceFeedTests(TestCase):

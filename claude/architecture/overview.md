@@ -59,8 +59,11 @@ each app's env loader only reads its own directory.
   implements a separate password + signed-token auth scheme
   (`Authorization: Bearer` or `X-Agent-Control-Token` header) for the `/api/agent/control/*` dashboard
   endpoints, distinct from Django's own auth.
-- **`articles`** — the public-facing content model: `Card` (an hour /
-  calendar day / week / month digest; only the current hour is ever `open`),
+- **`articles`** — the public-facing content model: `Card` (a 4-hour
+  intraday block at 00/04/…/20 UTC / calendar day / week / month digest; only
+  the current intraday block is ever `open`; once a day's card is final, that
+  day's intraday briefs drop out of the feed and sitemap and their pages
+  carry `noindex` plus a link to the day article),
   `CardArticle`/`CardAsset`, `AssetSeries` (a named price series),
   `AssetCandle` (1-minute OHLC, unique per series+minute). Views are DRF
   `APIView`s with serializers; `articles/stream.py` adds the SSE endpoints
@@ -88,7 +91,8 @@ token header). Public pages render server-side via `useAsyncData` +
 `composables/useNewsApi.js` (`NUXT_API_BASE_URL` is the in-network API URL
 for SSR, `NUXT_PUBLIC_API_BASE_URL` the browser's), then receive live
 updates over SSE via `composables/useEventStream.js` (`/stream/home/`,
-`/stream/articles/{id}/`). `server/routes/` serves `sitemap.xml`,
+`/stream/articles/{id}/`). Article pages throw a real 404/503 (`error.vue`)
+and emit `NewsArticle` JSON-LD. `server/routes/` serves `sitemap.xml`,
 `rss.xml` and `robots.txt`.
 
 `frontend/ARCHITECTURE.md`, `frontend/TECHNICAL_DEEP_DIVE.md`, and

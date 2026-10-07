@@ -1,20 +1,27 @@
 <template>
   <div class="page-container">
-    <!-- Current hour card (always at top) -->
+    <header class="page-intro">
+      <h1 class="page-title">What moved the markets today</h1>
+      <p class="page-lede">
+        A new brief every 4 hours on what happened and how prices reacted. Each past day is summed up in one article.
+      </p>
+    </header>
+
+    <!-- Current 4-hour block (always at top) -->
     <div v-if="currentCard" class="current-card-section">
-      <HourlyCard :card="currentCard" :is-current="true" />
+      <IntradayCard :card="currentCard" :is-current="true" />
     </div>
 
-    <!-- Historical cards, newest first (hourly and daily interleaved) -->
+    <!-- Historical cards, newest first (today's 4-hour briefs, then one article per past day) -->
     <div class="cards-stack">
-      <template v-for="(card, index) in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'hourly'}-${card.id}`">
+      <template v-for="(card, index) in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`">
         <DailyCard
           v-if="card.is_daily_summary"
           :card="card"
           :related-article-id="card.related_article_id"
           :style="{ '--animation-delay': `${index * 50}ms` }"
         />
-        <HourlyCard v-else :card="card" :is-current="false" :style="{ '--animation-delay': `${index * 50}ms` }" />
+        <IntradayCard v-else :card="card" :is-current="false" :style="{ '--animation-delay': `${index * 50}ms` }" />
       </template>
 
       <!-- Load more sentinel -->
@@ -101,14 +108,13 @@ useEventStream('/stream/home/', {
   },
 })
 
-useHead({
-  title: 'NousNews · Live Brief',
-  meta: [
-    {
-      name: 'description',
-      content: 'NousNews: Agent-driven economic intelligence with real-time market analysis.',
-    },
-  ],
+useSeoMeta({
+  title: 'NousNews · What moved the markets today',
+  description:
+    'Market news every 4 hours: what happened, why it matters, and how stocks, bonds, gold, oil and crypto reacted — with live price charts.',
+  ogTitle: 'NousNews · What moved the markets today',
+  ogDescription: 'Market news every 4 hours with the price reaction charted next to it.',
+  ogType: 'website',
 })
 </script>
 
@@ -120,8 +126,28 @@ useHead({
   padding-bottom: 48px;
 }
 
-.current-card-section {
+.page-intro {
   padding-top: 32px;
+}
+
+.page-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.page-lede {
+  margin: 8px 0 0;
+  max-width: 60ch;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-soft);
+}
+
+.current-card-section {
+  padding-top: 24px;
   padding-bottom: 0;
 }
 

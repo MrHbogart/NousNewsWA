@@ -39,15 +39,13 @@ def enabled_price_source_labels() -> dict[str, str]:
     return symbol_labels
 
 
-def get_hour_window(at_time):
-    start = at_time.replace(minute=0, second=0, microsecond=0)
-    end = start + timedelta(hours=1)
-    return start, end
+INTRADAY_HOURS = 4
 
 
 def get_period_window(at_time, timeframe: str):
-    if timeframe == "hour":
-        return get_hour_window(at_time)
+    if timeframe == "intraday":
+        start = at_time.replace(hour=at_time.hour - at_time.hour % INTRADAY_HOURS, minute=0, second=0, microsecond=0)
+        return start, start + timedelta(hours=INTRADAY_HOURS)
     if timeframe == "day":
         start = at_time.replace(hour=0, minute=0, second=0, microsecond=0)
         end = start + timedelta(days=1)
@@ -70,12 +68,12 @@ def get_period_window(at_time, timeframe: str):
 
 def resolve_timeframe(timeframe: str) -> tuple[int, int, str]:
     mapping = {
-        "hour": (1, 60, "1m"),
+        "intraday": (5, 48, "5m"),
         "day": (15, 96, "15m"),
         "week": (240, 42, "4h"),
         "month": (1440, 30, "1d"),
     }
-    return mapping.get(timeframe, (1, 60, "1m"))
+    return mapping.get(timeframe, (5, 48, "5m"))
 
 
 def aggregate_candles(

@@ -375,7 +375,9 @@ function formatDateRange(item) {
   const end = new Date(item.period_end || '')
   if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return ''
   const fmt = (d) => d.toLocaleDateString('en-US', { month: 'short', day: '2-digit', timeZone: 'UTC' })
-  return `${fmt(start)} – ${fmt(end)} UTC`
+  // period_end is exclusive (next midnight): a day brief covers just its start date.
+  if (item.timeframe === 'day') return `${fmt(start)} UTC`
+  return `${fmt(start)} – ${fmt(new Date(end.getTime() - 1))} UTC`
 }
 </script>
 
