@@ -119,6 +119,25 @@ Key groups:
 - `DJANGO_SUPERUSER_*` (optional — leave `DJANGO_SUPERUSER_USERNAME`/
   `_PASSWORD` blank to skip creating an admin account)
 - `NUXT_PUBLIC_API_BASE_URL`, `NUXT_PUBLIC_SITE_DOMAIN`
+- `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` — optional; values set in Django
+  admin (`AgentConfig`) win. Without a key, briefs use template text.
+- Provider keys (`FINNHUB_API_KEY`, `ALPHAVANTAGE_API_KEY`, `NEWSAPI_API_KEY`,
+  `GNEWS_API_KEY`, `MARKETAUX_API_KEY`, `FRED_API_KEY`, `TWELVEDATA_API_KEY`) —
+  a seeded source needing one turns on at the next start once it's set
+- `PRICE_CRYPTO_EXCHANGE` — ccxt exchange for crypto bars (default `binance`)
+
+## Data sources
+
+- News: central-bank feeds plus free market RSS (MarketWatch, Investing.com,
+  FT, BBC, Economist, Guardian, Nasdaq, Seeking Alpha, ForexLive, FXEmpire,
+  OilPrice, CoinDesk, Cointelegraph, Google News topic searches); key-gated
+  APIs (Finnhub, Alpha Vantage, NewsAPI, GNews, Marketaux, FRED). Edit or add
+  sources in Django admin (`NewsSource`).
+- Prices (1-minute bars): Yahoo Finance via `yfinance` for gold, silver, WTI,
+  S&P 500, Nasdaq, DXY, EUR/USD and the US 10Y yield; crypto (BTC, ETH) via
+  `ccxt`, with Yahoo as fallback. `PriceSource` rows add other feeds.
+- Use Django admin → Agent Configuration → "Test LLM connection" after
+  setting a key.
 
 You can generate secure secrets with:
 
@@ -134,8 +153,8 @@ Articles and briefs (`backend/articles/urls.py`):
 - `GET /health/` — always 200 while the API is up; `agent` reports whether
   the worker is alive and when it last ran news/price syncs
 - `GET /lasthour/` — the current 4-hour intraday brief (open), else the latest final one
-- `GET /briefs/?page=0&limit=10` — final briefs of every timeframe, newest
-  period end first; intraday briefs of days that already have a final day
+- `GET /briefs/?page=0&limit=10[&timeframe=intraday|day|week|month]` — final
+  briefs, newest period end first; intraday briefs of days that already have a final day
   article are left out (the day article replaces them)
 - `GET /sitemap/` — `{slug, updated_at}` of every indexable article (the
   same set plus aftermaths), for the frontend's `/sitemap.xml`
@@ -147,7 +166,9 @@ Live updates (Server-Sent Events, `backend/articles/stream.py`):
   for the current intraday brief on every price tick; `: ping` every 15s
 - `GET /stream/articles/{uuid-or-slug}/` — `event: article` on connect and
   on change; `event: prices` for that article's charts on every price tick
-- Both are pushed via Postgres `LISTEN/NOTIFY` (well under a second after a
+- `GET /stream/ticker/` — `event: ticker` with the market overview (same
+  payload as `/prices/overview/`) on every price tick
+- All are pushed via Postgres `LISTEN/NOTIFY` (well under a second after a
   write); the worker syncs prices every `price_loop_interval_seconds`
   (default 15s), independent of the news run
 
@@ -163,6 +184,8 @@ Agent (`backend/agent/urls.py`; all need a control token from
 
 Prices (`backend/prices/urls.py`, mounted at `/api/prices/`):
 - `GET /health/`
+- `GET /overview/` — last price, 24h change and a 24h sparkline per tracked
+  instrument (the site-wide ticker)
 - `GET /series/`
 - `GET /series/{symbol}/latest/`
 

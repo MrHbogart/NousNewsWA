@@ -55,208 +55,92 @@
 
       <Transition name="article-fade" mode="out-in">
         <div :key="articleRenderKey" class="article-stack">
-      <div class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
-        <p class="text-xs text-ink-500">
-          {{ kindLabel }}
-          <span v-if="publishedLabel"> · {{ publishedLabel }}</span>
-        </p>
-        <h1 class="mt-3 text-3xl text-ink-900 sm:text-4xl">
-          {{ displayedArticle?.title || 'Untitled report' }}
-        </h1>
-        <p v-if="cleanSummary" class="article-lead">
-          {{ cleanSummary }}
-        </p>
-        <p class="mt-3 text-sm text-ink-500">
-          Updated {{ updatedLabel || 'unknown time' }}
-        </p>
-      </div>
-
-      <div class="article-body-card rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
-        <div v-if="articleParagraphs.length" class="article-body-content">
-          <p v-for="(paragraph, index) in articleParagraphs" :key="`paragraph-${index}`">
-            {{ paragraph }}
-          </p>
-        </div>
-        <p v-else class="text-ink-400">No article body available yet.</p>
-      </div>
-
-      <div
-        v-if="priceSeriesList.length"
-        class="news-chart"
-        :style="{ '--chart-count': chartTabs.length }"
-      >
-        <div class="news-chart-tabs" role="tablist" aria-label="Related charts">
-          <button
-            v-for="(item, index) in chartTabs"
-            :key="`${item}-${index}`"
-            class="news-chart-tab"
-            :class="{ 'is-active': chartOpen && activeChart === index }"
-            type="button"
-            role="tab"
-            :aria-selected="chartOpen && activeChart === index"
-            @click="onChartTab(index)"
-          >
-            {{ item }}
-          </button>
-        </div>
-        <div class="news-chart-panel" :class="{ 'is-open': chartOpen }">
-          <div
-            class="news-chart-track"
-            :style="{ transform: `translateX(-${activeChart * (100 / chartTabs.length)}%)` }"
-          >
-            <div
-              v-for="(label, chartIndex) in chartTabs"
-              :key="`chart-${chartIndex}`"
-              class="news-chart-frame"
-            >
-              <svg
-                class="news-chart-canvas"
-                :viewBox="`0 0 ${chart.width} ${chart.height}`"
-                role="img"
-                :aria-label="`${label} candlestick chart`"
-              >
-                <g v-if="chartDataSets[chartIndex]?.candles.length">
-                  <g class="news-chart-grid">
-                    <line
-                      v-for="(tick, idx) in chartDataSets[chartIndex].yTicks"
-                      :key="`y-grid-${chartIndex}-${idx}`"
-                      :x1="chart.bounds.left"
-                      :x2="chart.bounds.right"
-                      :y1="tick.y"
-                      :y2="tick.y"
-                    />
-                    <line
-                      v-for="(tick, idx) in chartDataSets[chartIndex].xTicks"
-                      :key="`x-grid-${chartIndex}-${idx}`"
-                      :y1="chart.bounds.top"
-                      :y2="chart.bounds.bottom"
-                      :x1="tick.x"
-                      :x2="tick.x"
-                    />
-                  </g>
-                  <g class="news-chart-axis">
-                    <text
-                      v-for="(tick, idx) in chartDataSets[chartIndex].yTicks"
-                      :key="`y-label-${chartIndex}-${idx}`"
-                      :x="chart.bounds.left - 6"
-                      :y="tick.y + 4"
-                      text-anchor="end"
-                    >
-                      {{ tick.label }}
-                    </text>
-                    <text
-                      v-for="(tick, idx) in chartDataSets[chartIndex].xTicks"
-                      :key="`x-label-${chartIndex}-${idx}`"
-                      :x="tick.x"
-                      :y="chart.bounds.bottom + 18"
-                      text-anchor="middle"
-                    >
-                      {{ tick.label }}
-                    </text>
-                  </g>
-                  <g class="news-chart-guide">
-                    <line
-                      v-for="(guide, idx) in (chartDataSets[chartIndex]?.priceLines || [])"
-                      :key="`guide-${chartIndex}-${idx}`"
-                      :x1="chart.bounds.left"
-                      :x2="chart.bounds.right"
-                      :y1="guide.y"
-                      :y2="guide.y"
-                      :stroke="guide.color"
-                      stroke-width="1.2"
-                      stroke-dasharray="4 4"
-                    />
-                    <template v-for="(guide, idx) in (chartDataSets[chartIndex]?.priceLines || [])" :key="`guide-label-${idx}`">
-                      <text
-                        v-if="guide.kind !== 'last'"
-                        :x="chart.width - 6"
-                        :y="guide.kind === 'high' ? guide.y - 6 : guide.y + 12"
-                        text-anchor="end"
-                        :fill="guide.color"
-                      >
-                        {{ guide.label }}
-                      </text>
-                    </template>
-                    <text
-                      v-if="chartDataSets[chartIndex].lastPriceLabel"
-                      :x="chart.width - 6"
-                      :y="chart.bounds.top + 12"
-                      text-anchor="end"
-                      class="news-chart-last"
-                    >
-                      {{ chartDataSets[chartIndex].lastPriceLabel }}
-                    </text>
-                  </g>
-                  <line
-                    v-for="(candle, idx) in chartDataSets[chartIndex].candles"
-                    :key="`wick-${chartIndex}-${idx}`"
-                    :x1="candle.x"
-                    :x2="candle.x"
-                    :y1="candle.highY"
-                    :y2="candle.lowY"
-                    :stroke="candle.color"
-                    stroke-width="1.4"
-                    stroke-linecap="round"
-                  />
-                  <rect
-                    v-for="(candle, idx) in chartDataSets[chartIndex].candles"
-                    :key="`body-${chartIndex}-${idx}`"
-                    :x="candle.bodyX"
-                    :y="candle.bodyY"
-                    :width="candle.bodyWidth"
-                    :height="candle.bodyHeight"
-                    :fill="candle.color"
-                    rx="1"
-                  />
-                </g>
-              </svg>
+          <header class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
+            <p class="article-kicker">
+              {{ kindLabel }}<span v-if="periodLabel">, {{ periodLabel }}</span>
+            </p>
+            <h1 class="article-title">{{ displayedArticle?.title || 'Untitled report' }}</h1>
+            <p v-if="cleanSummary" class="article-lead">{{ cleanSummary }}</p>
+            <div class="article-meta">
+              <ImportanceMarker :score="displayedArticle?.importance_score" />
+              <span v-if="readingMinutes">{{ readingMinutes }} min read</span>
+              <span v-if="updatedLabel">Updated {{ updatedLabel }}</span>
             </div>
+            <div class="article-share">
+              <button type="button" class="share-btn" @click="copyLink">{{ copied ? 'Link copied' : 'Copy link' }}</button>
+              <a class="share-btn" :href="shareLinks.x" target="_blank" rel="noopener noreferrer">Share on X</a>
+              <a class="share-btn" :href="shareLinks.linkedin" target="_blank" rel="noopener noreferrer">Share on LinkedIn</a>
+            </div>
+          </header>
+
+          <section v-if="takeaways.length" class="takeaways" aria-labelledby="takeaways-title">
+            <h2 id="takeaways-title">Key takeaways</h2>
+            <ul>
+              <li v-for="item in takeaways" :key="item">{{ item }}</li>
+            </ul>
+          </section>
+
+          <div class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
+            <div v-if="articleBlocks.length" class="article-body-content">
+              <template v-for="(block, index) in articleBlocks" :key="index">
+                <h2 v-if="block.type === 'h2'">{{ block.text }}</h2>
+                <ul v-else-if="block.type === 'ul'">
+                  <li v-for="(item, i) in block.items" :key="i">{{ item }}</li>
+                </ul>
+                <p v-else>{{ block.text }}</p>
+              </template>
+            </div>
+            <p v-else class="text-ink-400">The full text of this brief isn't available yet.</p>
+          </div>
+
+          <section v-if="performance.length" class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
+            <h2 class="section-title">How markets moved{{ displayedArticle?.kind === 'aftermath' ? ' after the brief' : ' in this period' }}</h2>
+            <div class="perf-wrap">
+              <table class="perf">
+                <thead>
+                  <tr><th scope="col">Market</th><th scope="col">Open</th><th scope="col">Last</th><th scope="col">Change</th><th scope="col">Range</th></tr>
+                </thead>
+                <tbody>
+                  <tr v-for="row in performance" :key="row.label">
+                    <th scope="row">{{ row.label }}</th>
+                    <td>{{ formatPrice(row.open) }}</td>
+                    <td>{{ formatPrice(row.close) }}</td>
+                    <td :class="`is-${changeDirection(row.pct)}`">{{ formatChange(row.pct) }}</td>
+                    <td>{{ formatPrice(row.low) }} – {{ formatPrice(row.high) }}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+            <PriceChart class="mt-5" :series="priceSeriesList" initially-open />
+          </section>
+
+          <div v-if="aftermathLink" class="rounded-2xl border border-ink-900/10 bg-white p-6">
+            <NuxtLink :to="`/articles/${aftermathLink.slug}`" class="text-sm font-medium text-ink-900 underline">
+              What happened to prices after this brief
+            </NuxtLink>
+          </div>
+
+          <div v-if="relatedLinks.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
+            <h2 class="section-title">Also in this period</h2>
+            <ul class="mt-3 space-y-2 text-sm text-ink-700">
+              <li v-for="item in relatedLinks" :key="item.uuid">
+                <NuxtLink :to="`/articles/${item.slug || item.uuid}`" class="hover:text-ink-900">
+                  {{ item.title || 'Untitled brief' }}
+                </NuxtLink>
+              </li>
+            </ul>
+          </div>
+
+          <div v-if="references.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
+            <h2 class="section-title">Sources</h2>
+            <ol class="sources">
+              <li v-for="ref in references" :key="ref.url">
+                <a :href="ref.url" target="_blank" rel="noopener noreferrer nofollow">{{ ref.host }}</a>
+                <span class="sources-path">{{ ref.path }}</span>
+              </li>
+            </ol>
           </div>
         </div>
-      </div>
-
-      <div v-if="aftermathLink" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-        <NuxtLink
-          :to="`/articles/${aftermathLink.slug}`"
-          class="inline-flex items-center gap-2 text-sm text-ink-700 hover:text-ink-900"
-        >
-          See what happened after →
-        </NuxtLink>
-      </div>
-
-      <div v-if="relatedLinks.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-        <p class="text-xs uppercase tracking-[0.12em] text-ink-500">Related briefs</p>
-        <ul class="mt-3 space-y-2 text-sm text-ink-700">
-          <li v-for="item in relatedLinks" :key="item.uuid">
-            <NuxtLink :to="`/articles/${item.slug || item.uuid}`" class="hover:text-ink-900">
-              {{ item.title || 'Untitled brief' }}
-            </NuxtLink>
-          </li>
-        </ul>
-      </div>
-
-      <div v-if="displayedArticle?.references?.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-        <p class="text-xs uppercase tracking-[0.12em] text-ink-500">References</p>
-        <ul class="mt-3 space-y-2">
-          <li v-for="ref in displayedArticle?.references || []" :key="ref">
-            <a
-              :href="ref"
-              target="_blank"
-              rel="noreferrer"
-              class="inline-flex items-start text-sm text-ink-700 hover:text-ink-900 transition break-all"
-              :title="ref"
-            >
-              <span class="inline-flex items-center gap-1.5 flex-1">
-                {{ ref }}
-                <svg class="w-3 h-3 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
-                </svg>
-              </span>
-            </a>
-          </li>
-        </ul>
-      </div>
-      </div>
       </Transition>
     </article>
   </section>
@@ -399,7 +283,6 @@ watch(
 
 const hasPendingArticleUpdate = computed(() => Boolean(pendingArticleUpdate.value))
 const articleRenderKey = computed(() => articleFingerprint(displayedArticle.value))
-const publishedLabel = computed(() => formatDate(displayedArticle.value?.hour_start))
 const updatedLabel = computed(() => formatDate(displayedArticle.value?.updated_at))
 const KIND_LABELS = { intraday: '4-hour market brief', day: 'Daily market brief', week: 'Weekly market brief', month: 'Monthly market brief' }
 const kindLabel = computed(() =>
@@ -413,137 +296,54 @@ const relatedLinks = computed(() => {
   return items.filter((item) => item.kind === 'side').slice(0, 2)
 })
 const cleanSummary = computed(() => sanitizeArticleText(displayedArticle.value?.summary || ''))
-const articleParagraphs = computed(() => {
-  const raw = sanitizeArticleText(displayedArticle.value?.article_content || '').replace(/\r\n/g, '\n').trim()
-  if (!raw) return []
-  return raw
-    .split(/\n{2,}/)
-    .map((paragraph) => paragraph.trim())
-    .filter(Boolean)
+const articleBlocks = computed(() => parseArticleBlocks(displayedArticle.value?.article_content || ''))
+const takeaways = computed(() =>
+  (displayedArticle.value?.impacts || []).filter((item) => typeof item === 'string' && item.trim()).slice(0, 6)
+)
+const readingMinutes = computed(() => {
+  const words = `${cleanSummary.value} ${displayedArticle.value?.article_content || ''}`.split(/\s+/).filter(Boolean).length
+  return words > 60 ? Math.max(1, Math.round(words / 220)) : 0
 })
-const chartOpen = ref(true)
-const activeChart = ref(0)
 const priceSeriesList = computed(() => displayedArticle.value?.price_series || [])
-const chartTabs = computed(() =>
-  priceSeriesList.value.map((series) => series.label || series.symbol || "Asset")
+const performance = computed(() =>
+  priceSeriesList.value
+    .map((series) => ({ label: series.label || series.symbol, ...seriesChange(series) }))
+    .filter((row) => Number.isFinite(row.pct))
 )
-
-const chart = {
-  width: 720,
-  height: 280,
-  margin: { top: 12, right: 0, bottom: 36, left: 20 },
-  get bounds() {
-    return {
-      left: this.margin.left,
-      right: this.width - this.margin.right,
-      top: this.margin.top,
-      bottom: this.height - this.margin.bottom,
-    }
-  },
-}
-const chartDataSets = computed(() =>
-  priceSeriesList.value.map((series) => buildChartData(series.candles || [], series.expected_count))
-)
-
-function buildChartData(rows, expectedCount) {
-  const bounds = chart.bounds
-  if (!rows.length) return { candles: [], yTicks: [], xTicks: [], priceLines: [], lastPriceLabel: "" }
-  const slotCount = Math.max(rows.length, Number(expectedCount) || rows.length)
-  const highs = rows.map((row) => Number(row.high))
-  const lows = rows.map((row) => Number(row.low))
-  const max = Math.max(...highs)
-  const min = Math.min(...lows)
-  const range = Math.max(1e-6, max - min)
-  const scaleY = (value) =>
-    bounds.top + ((max - value) / range) * (bounds.bottom - bounds.top)
-  const step = (bounds.right - bounds.left) / slotCount
-  const bodyWidth = Math.max(4, step * 0.6)
-
-  const candles = rows.map((row, index) => {
-    const openValue = Number(row.open)
-    const closeValue = Number(row.close)
-    const highValue = Number(row.high)
-    const lowValue = Number(row.low)
-    const centerX = bounds.left + index * step + step / 2
-    const openY = scaleY(openValue)
-    const closeY = scaleY(closeValue)
-    const highY = scaleY(highValue)
-    const lowY = scaleY(lowValue)
-    const bodyHeight = Math.max(2, Math.abs(openY - closeY))
-    const bodyY = Math.min(openY, closeY)
-    const color = closeValue >= openValue ? '#2f7f5e' : '#b34b4b'
-    return {
-      x: centerX,
-      highY,
-      lowY,
-      bodyX: centerX - bodyWidth / 2,
-      bodyY,
-      bodyWidth,
-      bodyHeight,
-      color,
+const references = computed(() =>
+  (displayedArticle.value?.references || []).flatMap((url) => {
+    try {
+      const parsed = new URL(url)
+      return [{ url, host: parsed.hostname.replace(/^www\./, ''), path: parsed.pathname.length > 1 ? parsed.pathname : '' }]
+    } catch {
+      return []
     }
   })
-  const yTicks = buildYTicks(bounds, min, max)
-  const xTicks = buildXTicks(rows, bounds, slotCount)
-  const last = rows[rows.length - 1]
-  const priceLines = [
-    buildPriceGuide("High", max, scaleY, "#1f6f52", "high"),
-    buildPriceGuide("Last", last?.close ?? max, scaleY, "#1d2326", "last"),
-    buildPriceGuide("Low", min, scaleY, "#a04343", "low"),
-  ]
-  const lastClose = Number(last?.close)
-  const lastPriceLabel = Number.isFinite(lastClose) ? `Last ${lastClose.toFixed(2)}` : ""
-  return { candles, yTicks, xTicks, priceLines, lastPriceLabel }
+)
+const PERIOD_FORMATS = {
+  intraday: { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false },
+  day: { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' },
+  week: { month: 'long', day: 'numeric', year: 'numeric' },
+  month: { month: 'long', year: 'numeric' },
 }
+const periodLabel = computed(() => {
+  const article = displayedArticle.value
+  const start = new Date(article?.period_start || '')
+  if (!article || Number.isNaN(start.getTime())) return ''
+  const label = start.toLocaleString('en-US', { timeZone: 'UTC', ...(PERIOD_FORMATS[article.timeframe] || PERIOD_FORMATS.day) })
+  if (article.timeframe === 'week') return `week of ${label}`
+  return article.timeframe === 'intraday' ? `${label} UTC` : label
+})
 
-function buildYTicks(bounds, min, max) {
-  const tickCount = 5
-  const ticks = []
-  for (let i = 0; i < tickCount; i += 1) {
-    const t = i / (tickCount - 1)
-    const value = max - (max - min) * t
-    const y = bounds.top + ((max - value) / Math.max(1e-6, max - min)) * (bounds.bottom - bounds.top)
-    ticks.push({ y, label: value.toFixed(2) })
+const copied = ref(false)
+async function copyLink() {
+  try {
+    await navigator.clipboard.writeText(articleUrl.value)
+    copied.value = true
+    setTimeout(() => (copied.value = false), 2000)
+  } catch {
+    copied.value = false
   }
-  return ticks
-}
-
-function buildXTicks(rows, bounds, slotCount) {
-  const tickCount = 4
-  const step = (bounds.right - bounds.left) / Math.max(1, slotCount)
-  const ticks = []
-  for (let i = 0; i < tickCount; i += 1) {
-    const index = Math.floor((slotCount - 1) * (i / (tickCount - 1)))
-    const x = bounds.left + index * step + step / 2
-    const label = index < rows.length ? formatTimeLabel(rows[index]?.timestamp || '') : ''
-    ticks.push({ x, label })
-  }
-  return ticks
-}
-
-function formatTimeLabel(value) {
-  if (!value) return ''
-  const parts = value.split(' ')
-  if (parts.length < 2) return value
-  return parts[1].slice(0, 5)
-}
-
-function buildPriceGuide(label, value, scaleY, color, kind) {
-  return {
-    y: scaleY(value),
-    label: `${label} ${value.toFixed(2)}`,
-    color,
-    kind,
-  }
-}
-
-function onChartTab(index) {
-  if (chartOpen.value && activeChart.value === index) {
-    chartOpen.value = false
-    return
-  }
-  activeChart.value = index
-  chartOpen.value = true
 }
 
 function formatDate(value) {
@@ -563,6 +363,14 @@ function formatDate(value) {
 
 const siteUrl = config.public.siteDomain.replace(/\/$/, '')
 const articleUrl = computed(() => `${siteUrl}/articles/${displayedArticle.value?.slug || articleId.value}`)
+const shareLinks = computed(() => {
+  const url = encodeURIComponent(articleUrl.value)
+  const text = encodeURIComponent(displayedArticle.value?.title || '')
+  return {
+    x: `https://x.com/intent/post?url=${url}&text=${text}`,
+    linkedin: `https://www.linkedin.com/sharing/share-offsite/?url=${url}`,
+  }
+})
 const metaDescription = computed(() => cleanSummary.value.slice(0, 160) || 'NousNews market report.')
 
 // schema.org NewsArticle; "<" escaped so article text can't close the script tag.
@@ -636,6 +444,144 @@ useHead(() => ({
   gap: 1.25rem;
 }
 
+.article-kicker {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.article-title {
+  margin: 10px 0 0;
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.4rem);
+  line-height: 1.18;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.article-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.share-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.share-btn:hover {
+  color: var(--ink);
+  border-color: rgba(15, 20, 30, 0.2);
+}
+
+.share-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.takeaways {
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  padding: 18px 22px;
+}
+
+.takeaways h2,
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.takeaways ul {
+  margin: 10px 0 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.perf-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.perf {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.perf th,
+.perf td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+.perf th:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.perf thead th {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.perf .is-up {
+  color: var(--up);
+}
+
+.perf .is-down {
+  color: var(--down);
+}
+
+.sources {
+  margin: 12px 0 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.sources a {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.sources-path {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
 .article-lead {
   margin-top: 1rem;
   font-size: 1.04rem;
@@ -659,8 +605,167 @@ useHead(() => ({
   margin-bottom: 0;
 }
 
+.article-body-content h2 {
+  margin: 1.6em 0 0.5em;
+  font-size: 1.2rem;
+  line-height: 1.35;
+  font-weight: 600;
+}
+
+.article-body-content h2:first-child {
+  margin-top: 0;
+}
+
+.article-body-content ul {
+  margin: 0 0 1.1em;
+  padding-left: 1.2em;
+  list-style: disc;
+}
+
+.article-body-content li {
+  margin-bottom: 0.35em;
+}
+
 @media (max-width: 640px) {
-  .article-lead {
+  .article-kicker {
+  margin: 0;
+  font-size: 13px;
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.article-title {
+  margin: 10px 0 0;
+  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.4rem);
+  line-height: 1.18;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+
+.article-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-top: 16px;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.article-share {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.share-btn {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  padding: 5px 12px;
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.share-btn:hover {
+  color: var(--ink);
+  border-color: rgba(15, 20, 30, 0.2);
+}
+
+.share-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.takeaways {
+  border-left: 3px solid var(--accent);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  padding: 18px 22px;
+}
+
+.takeaways h2,
+.section-title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.takeaways ul {
+  margin: 10px 0 0;
+  padding-left: 1.1em;
+  display: grid;
+  gap: 6px;
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+
+.perf-wrap {
+  margin-top: 14px;
+  overflow-x: auto;
+}
+
+.perf {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.perf th,
+.perf td {
+  padding: 8px 10px;
+  text-align: right;
+  border-bottom: 1px solid var(--line);
+}
+
+.perf th:first-child {
+  text-align: left;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.perf thead th {
+  font-weight: 500;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.perf .is-up {
+  color: var(--up);
+}
+
+.perf .is-down {
+  color: var(--down);
+}
+
+.sources {
+  margin: 12px 0 0;
+  padding-left: 1.3em;
+  display: grid;
+  gap: 6px;
+  font-size: 13.5px;
+}
+
+.sources a {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.sources-path {
+  margin-left: 6px;
+  color: var(--ink-soft);
+  overflow-wrap: anywhere;
+}
+
+.article-lead {
     font-size: 1rem;
     line-height: 1.72;
   }

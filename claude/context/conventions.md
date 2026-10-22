@@ -14,7 +14,10 @@
     LLM API key, timeouts, token budgets, control-token TTL. Edit it via
     Django admin or `PUT /api/agent/config/`, not `.env`. Don't add an
     env var for something that's really an `AgentConfig` field, and vice
-    versa.
+    versa. Exception: secrets may come from env as a fallback — `LLM_API_KEY`
+    (and `LLM_BASE_URL`) in `agent/llm.py`, provider keys via
+    `agent.models.PROVIDER_KEY_ENV` / `resolved_api_key`; a value set in the
+    DB row always wins.
 - **Migrations are committed.** `backend/*/migrations/` is real, checked-in
   history (reset to a fresh `0001_initial` per app on 2026-09-27 while data
   was still disposable — see `decisions/known-issues.md`).

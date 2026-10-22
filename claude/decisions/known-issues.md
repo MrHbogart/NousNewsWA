@@ -193,13 +193,17 @@ to a fresh `0001_initial` per app (data was disposable).
   OpenRouter model id / max tokens fixed (migration `agent/0003`).
 - Worker holds a Postgres advisory lock (second replica = standby).
 - New: `/api/prices/overview/`, `/api/stream/ticker/`, `/briefs/?timeframe=`.
+- Frontend: one `PriceChart.vue` replaces three copies; live `MarketTicker`;
+  the article page renders `## ` sections, key takeaways (`impacts`), a
+  performance table and share links (`utils/market.js`).
 
 ## Open — flagged, not changed
 
 - **No paid/maintained price provider yet.** yfinance and Binance (via ccxt)
   are free but unofficial or geo-restricted; pick a provider with an SLA
   before relying on prices.
-- **No CI** (tests exist now: `python manage.py test`).
+- **CI** (`.github/workflows/ci.yml`) runs lint, checks, tests and the
+  frontend build; it doesn't hit real feeds or the LLM.
 - **Admin dashboard (`/agent-control`) still polls (5s), deliberately.**
   `EventSource` can't send the control token header, and a query-string
   token would land in access logs; admin-only, so polling is fine. Revisit
@@ -207,5 +211,3 @@ to a fresh `0001_initial` per app (data was disposable).
 - **No structured (JSON) logging** yet.
 - **Economist agent / `MemoryState`** remain behind
   `AGENT_ENABLE_ECONOMIST_AGENT=false` with no tests.
-- **Article page** still has its own chart code; switch it to `PriceChart.vue`
-  and render `impacts` + `## ` sections via `utils/market.js`.
