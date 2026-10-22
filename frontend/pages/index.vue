@@ -8,20 +8,18 @@
     </header>
 
     <!-- Current 4-hour block (always at top) -->
-    <div v-if="currentCard" class="current-card-section">
+    <div v-if="currentCard && !timeframe" class="current-card-section">
       <IntradayCard :card="currentCard" :is-current="true" />
     </div>
 
     <!-- Historical cards, newest first (today's 4-hour briefs, then one article per past day) -->
     <div class="cards-stack">
-      <template v-for="(card, index) in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`">
+      <template v-for="card in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`">
         <DailyCard
           v-if="card.is_daily_summary"
           :card="card"
-          :related-article-id="card.related_article_id"
-          :style="{ '--animation-delay': `${index * 50}ms` }"
         />
-        <IntradayCard v-else :card="card" :is-current="false" :style="{ '--animation-delay': `${index * 50}ms` }" />
+        <IntradayCard v-else :card="card" :is-current="false" />
       </template>
 
       <!-- Load more sentinel -->
@@ -49,12 +47,15 @@
 
 <script setup>
 const api = useNewsApi()
+const route = useRoute()
 const pageSize = 10
+// ?timeframe=day|week|month narrows the feed (header links); empty = everything.
+const timeframe = computed(() => (['day', 'week', 'month'].includes(route.query.timeframe) ? route.query.timeframe : ''))
 
 const infiniteScroll = useInfiniteScroll(
   async (page, limit) => {
     try {
-      const response = await api.getBriefs({ page, limit })
+      const response = await api.getBriefs({ page, limit, timeframe: timeframe.value })
       return response?.results || []
     } catch (err) {
       console.error('Error fetching historical cards:', err)
@@ -68,10 +69,10 @@ const infiniteScroll = useInfiniteScroll(
 const sentinel = infiniteScroll.sentinel
 
 // Rendered on the server; live updates arrive over SSE afterwards.
-const { data: initial } = await useAsyncData('home', async () => {
+const { data: initial } = await useAsyncData(`home-${timeframe.value}`, async () => {
   const [lasthour, briefs] = await Promise.all([
     api.getLastHour().catch(() => null),
-    api.getBriefs({ page: 0, limit: pageSize }).catch(() => null),
+    api.getBriefs({ page: 0, limit: pageSize, timeframe: timeframe.value }).catch(() => null),
   ])
   return { lasthour, briefs: briefs?.results || [] }
 })
@@ -86,8 +87,14 @@ const totalCards = computed(() => (currentCard.value ? 1 : 0) + historicalCards.
 
 // Prepend newly published briefs and refresh edited ones, without discarding
 // pages already scrolled into.
+watch(timeframe, () => {
+  infiniteScroll.reset()
+  infiniteScroll.loadMore()
+})
+
 function mergeLatestBriefs(newest) {
-  if (!newest?.length) return
+  // The live payload is the unfiltered feed.
+  if (!newest?.length || timeframe.value) return
   const byId = new Map(newest.map((item) => [item.id, item]))
   const known = infiniteScroll.items.value.map((item) => byId.get(item.id) || item)
   const knownIds = new Set(known.map((item) => item.id))

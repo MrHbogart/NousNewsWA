@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+
 from django.core.management.base import BaseCommand
 
 from agent.models import AgentConfig, MemoryState, NewsSource, PriceSource
@@ -56,9 +58,10 @@ NEWS_RSS_SOURCES = [
         "rate_limit_seconds": 60,
     },
     {
+        # Blocks non-browser clients (403); kept so existing installs see why it's off.
         "name": "RBA - Research & Policy",
         "base_url": "https://www.rba.gov.au/rss/rss-cb-rdp.xml",
-        "enabled": True,
+        "enabled": False,
         "rate_limit_seconds": 120,
     },
     {
@@ -74,6 +77,43 @@ NEWS_RSS_SOURCES = [
         "rate_limit_seconds": 120,
     },
 ]
+
+# Free market-news feeds (no key). Checked reachable 2026-10-22; a feed that
+# starts failing backs off on its own (see FetchingMixin._record_source_error).
+MARKET_RSS_SOURCES = [
+    {"name": "MarketWatch - Top Stories", "base_url": "https://feeds.marketwatch.com/marketwatch/topstories/"},
+    {"name": "Investing.com - Stock Market News", "base_url": "https://www.investing.com/rss/news_25.rss"},
+    {"name": "FT - Markets", "base_url": "https://www.ft.com/markets?format=rss"},
+    {"name": "BBC - Business", "base_url": "https://feeds.bbci.co.uk/news/business/rss.xml"},
+    {"name": "The Economist - Finance & Economics", "base_url": "https://www.economist.com/finance-and-economics/rss.xml"},
+    {"name": "The Guardian - Economics", "base_url": "https://www.theguardian.com/business/economics/rss"},
+    {"name": "Nasdaq - Markets", "base_url": "https://www.nasdaq.com/feed/rssoutbound?category=Markets"},
+    {"name": "Seeking Alpha - Market Currents", "base_url": "https://seekingalpha.com/market_currents.xml"},
+    {"name": "ForexLive - News", "base_url": "https://www.forexlive.com/feed/news"},
+    {"name": "FXEmpire - News", "base_url": "https://www.fxempire.com/api/v1/en/articles/rss/news"},
+    {"name": "OilPrice.com - Energy News", "base_url": "https://oilprice.com/rss/main"},
+    {"name": "CoinDesk - Crypto News", "base_url": "https://www.coindesk.com/arc/outboundfeeds/rss/"},
+    {"name": "Cointelegraph - Crypto News", "base_url": "https://cointelegraph.com/rss"},
+    {
+        "name": "Google News - Gold & Precious Metals",
+        "base_url": "https://news.google.com/rss/search?q=gold+price+OR+bullion+OR+silver+price+when:1d&hl=en-US&gl=US&ceid=US:en",
+    },
+    {
+        "name": "Google News - Oil & Energy Markets",
+        "base_url": "https://news.google.com/rss/search?q=oil+prices+OR+OPEC+OR+brent+crude+when:1d&hl=en-US&gl=US&ceid=US:en",
+    },
+    {
+        "name": "Google News - Forex & Rates",
+        "base_url": "https://news.google.com/rss/search?q=dollar+OR+forex+OR+treasury+yields+OR+%22rate+cut%22+when:1d&hl=en-US&gl=US&ceid=US:en",
+    },
+    {
+        "name": "Google News - Stock Markets",
+        "base_url": "https://news.google.com/rss/search?q=%22stock+market%22+OR+%22S%26P+500%22+OR+nasdaq+OR+%22wall+street%22+when:1d&hl=en-US&gl=US&ceid=US:en",
+    },
+]
+for _source in MARKET_RSS_SOURCES:
+    _source.setdefault("enabled", True)
+    _source.setdefault("rate_limit_seconds", 0)
 
 
 NEWS_API_SOURCES = [
@@ -100,7 +140,8 @@ NEWS_API_SOURCES = [
         "query": "economy_macro,financial_markets",
         "language_param": "sort",
         "language": "LATEST",
-        "rate_limit_seconds": 20,
+        # Free tier: 25 requests/day.
+        "rate_limit_seconds": 3600,
     },
     {
         "name": "NewsAPI - Central Banks & Markets",
@@ -116,7 +157,8 @@ NEWS_API_SOURCES = [
         "topic": "publishedAt",
         "since_param": "from",
         "since_format": "rfc3339",
-        "rate_limit_seconds": 6,
+        # Free tier: 100 requests/day.
+        "rate_limit_seconds": 900,
     },
     {
         "name": "FRED - Release Updates",
@@ -146,16 +188,38 @@ NEWS_API_SOURCES = [
         "language": "en",
         "region_param": "max",
         "region": "25",
-        "rate_limit_seconds": 6,
+        # Free tier: 100 requests/day.
+        "rate_limit_seconds": 900,
+    },
+    {
+        "name": "Marketaux - Financial News",
+        "base_url": "https://api.marketaux.com/v1/news/all",
+        "source_type": NewsSource.SOURCE_API,
+        "enabled": False,
+        "api_key_param": "api_token",
+        "language_param": "language",
+        "language": "en",
+        "query_param": "filter_entities",
+        "query": "true",
+        # Free tier: 100 requests/day.
+        "rate_limit_seconds": 900,
     },
 ]
 
 
+# Built-in providers (agent/price_sync.py) serve the first block; the FRED/
+# Treasury series only get data from their (key-gated) PriceSource rows.
 ASSET_SERIES = [
-    {"symbol": "DX-Y.NYB", "label": "US Dollar Index (DXY)", "timeframe": "1m"},
-    {"symbol": "XAUUSD=X", "label": "Gold Spot (XAUUSD)", "timeframe": "1m"},
-    {"symbol": "BTC-USD", "label": "Bitcoin (BTCUSD)", "timeframe": "1m"},
+    {"symbol": "XAUUSD=X", "label": "Gold (XAUUSD)", "timeframe": "1m"},
+    {"symbol": "XAGUSD=X", "label": "Silver (XAGUSD)", "timeframe": "1m"},
+    {"symbol": "CL=F", "label": "WTI Crude Oil", "timeframe": "1m"},
     {"symbol": "^GSPC", "label": "S&P 500 Index", "timeframe": "1m"},
+    {"symbol": "^IXIC", "label": "Nasdaq Composite", "timeframe": "1m"},
+    {"symbol": "DX-Y.NYB", "label": "US Dollar Index (DXY)", "timeframe": "1m"},
+    {"symbol": "EURUSD=X", "label": "EUR/USD", "timeframe": "1m"},
+    {"symbol": "^TNX", "label": "US 10Y Yield", "timeframe": "1m"},
+    {"symbol": "BTC-USD", "label": "Bitcoin (BTCUSD)", "timeframe": "1m"},
+    {"symbol": "ETH-USD", "label": "Ether (ETHUSD)", "timeframe": "1m"},
     {"symbol": "DTWEXBGS", "label": "Trade-Weighted USD Index (FRED)", "timeframe": "1m"},
     {"symbol": "DGS10", "label": "US 10Y Treasury Yield (FRED)", "timeframe": "1m"},
     {"symbol": "FEDFUNDS", "label": "Fed Funds Effective Rate (FRED)", "timeframe": "1m"},
@@ -170,7 +234,8 @@ PRICE_SOURCES = [
         "symbol": "BTC-USD",
         "chart_label": "Bitcoin",
         "source_type": PriceSource.SOURCE_API,
-        "enabled": True,
+        # Fallback only: ccxt/yfinance serve BTC-USD with real 1m bars.
+        "enabled": False,
         "price_regex": r"\"usd\"\s*:\s*(?P<price>-?\d+(?:\.\d+)?)",
         "rate_limit_seconds": 20,
     },
@@ -180,7 +245,8 @@ PRICE_SOURCES = [
         "symbol": "US_TREASURY_AVG_RATE",
         "chart_label": "US Treasury Avg Rate",
         "source_type": PriceSource.SOURCE_API,
-        "enabled": True,
+        # A monthly figure: it never lands inside a brief's window, so its chart is always empty.
+        "enabled": False,
         "price_regex": r"\"avg_interest_rate_amt\"\s*:\s*\"?(?P<price>-?\d+(?:\.\d+)?)\"?",
         "rate_limit_seconds": 300,
     },
@@ -312,6 +378,7 @@ class Command(BaseCommand):
 
         for definition in [
             *NEWS_RSS_SOURCES,
+            *MARKET_RSS_SOURCES,
             *NEWS_API_SOURCES,
         ]:
             source, was_created = NewsSource.objects.get_or_create(
@@ -322,6 +389,7 @@ class Command(BaseCommand):
                 created_news += 1
             if self._apply_missing_news_fields(source, definition):
                 updated_news += 1
+            self._enable_if_key_provided(source)
 
         for entry in ASSET_SERIES:
             series, _ = AssetSeries.objects.get_or_create(
@@ -348,17 +416,21 @@ class Command(BaseCommand):
                 created_prices += 1
             if self._apply_missing_price_fields(source, definition):
                 updated_prices += 1
+            self._enable_if_key_provided(source)
 
         # Defaults only for a fresh config: this runs on every container start
         # and must never overwrite what an admin changed.
         config, config_created = AgentConfig.objects.get_or_create()
         config_updates = {
-            "llm_base_url": "https://openrouter.ai/api/v1",
-            "llm_max_output_tokens": 20000,
+            # LLM_BASE_URL / LLM_MODEL pick the provider for a fresh install; OpenRouter
+            # model ids carry the vendor prefix.
+            "llm_base_url": os.getenv("LLM_BASE_URL", "").strip() or "https://openrouter.ai/api/v1",
+            "llm_model": os.getenv("LLM_MODEL", "").strip() or "openai/gpt-4o-mini",
+            "llm_max_output_tokens": 4000,
             "loop_interval_minutes": 15.0,
             "price_loop_interval_seconds": 15.0,
             "max_items_per_source": 100,
-            "max_context_chars": 50000,
+            "max_context_chars": 60000,
         }
         if config_created:
             for key, value in config_updates.items():
@@ -378,6 +450,22 @@ class Command(BaseCommand):
                 f"price created={created_prices}, price updated={updated_prices}"
             )
         )
+
+    @staticmethod
+    def _enable_if_key_provided(source) -> None:
+        """A key-gated source turns on once its key is set (e.g. FINNHUB_API_KEY in .env).
+
+        Only sources that never ran: one an admin switched off after it ran stays off.
+        """
+        if (
+            not source.enabled
+            and source.requires_api_key
+            and source.last_fetched_at is None
+            and source.failure_count == 0
+            and source.resolved_api_key
+        ):
+            source.enabled = True
+            source.save(update_fields=["enabled"])
 
     @staticmethod
     def _news_defaults(definition: dict) -> dict:

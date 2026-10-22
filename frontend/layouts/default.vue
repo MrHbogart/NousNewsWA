@@ -7,8 +7,14 @@
     <header class="app-header" :class="{ 'is-scrolled': isHeaderScrolled }">
       <div class="app-shell">
         <NuxtLink to="/" class="app-brand">NousNews</NuxtLink>
+        <nav class="app-nav" aria-label="Sections">
+          <NuxtLink v-for="link in SECTIONS" :key="link.label" :to="link.to" :class="{ 'is-active': isActive(link) }">
+            {{ link.label }}
+          </NuxtLink>
+        </nav>
       </div>
     </header>
+    <MarketTicker />
 
     <!-- Scrollable content area -->
     <main class="app-main" @scroll="onScroll">
@@ -33,6 +39,20 @@
 
 <script setup>
 const isHeaderScrolled = ref(false)
+const route = useRoute()
+
+const SECTIONS = [
+  { label: 'Latest', to: '/' },
+  { label: 'Daily', to: '/?timeframe=day' },
+  { label: 'Weekly', to: '/?timeframe=week' },
+  { label: 'Monthly', to: '/?timeframe=month' },
+]
+
+function isActive(link) {
+  if (route.path !== '/') return false
+  const current = route.query.timeframe || ''
+  return (link.to.split('timeframe=')[1] || '') === current
+}
 
 function onScroll(e) {
   isHeaderScrolled.value = e.target.scrollTop > 0
@@ -83,6 +103,44 @@ function onScroll(e) {
   align-items: center;
   justify-content: space-between;
   height: 64px;
+}
+
+.app-nav {
+  display: flex;
+  gap: 2px;
+  font-size: 14px;
+}
+
+.app-nav a {
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: var(--ink-soft);
+  text-decoration: none;
+}
+
+.app-nav a:hover {
+  color: var(--ink);
+  background: rgba(15, 20, 30, 0.04);
+}
+
+.app-nav a.is-active {
+  color: var(--ink);
+  font-weight: 600;
+}
+
+.app-nav a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+@media (max-width: 520px) {
+  .app-nav {
+    font-size: 13px;
+  }
+
+  .app-nav a {
+    padding: 6px 6px;
+  }
 }
 
 .app-brand {

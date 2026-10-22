@@ -9,6 +9,10 @@ from dateutil import parser as dtparser
 from agent.models import AgentLogEvent, AgentRun
 
 
+_ACCEPT = {"accept", "accepted", "include", "relevant", "yes", "allow"}
+_REJECT = {"reject", "rejected", "exclude", "irrelevant", "no", "drop"}
+
+
 def _mentions(text: str, term: str) -> bool:
     # Whole words (plus plural), so "pet" doesn't hit "competition" or "fed" "offered".
     return re.search(rf"\b{re.escape(term)}(?:s|es)?\b", text) is not None
@@ -17,89 +21,67 @@ def _mentions(text: str, term: str) -> bool:
 class ScoringMixin:
     """Heuristic + LLM-assisted relevance/importance scoring used to decide what gets written up."""
 
-    def _should_apply_llm_filter(self, run: Optional[AgentRun], heuristic_score: int) -> bool:
+    def _llm_filter_available(self, run: Optional[AgentRun]) -> bool:
         if run is None or not bool(getattr(run, "use_llm_filtering", False)):
             return False
         if not self.llm.enabled:
             return False
         if not (self.config.filter_prompt_template or "").strip():
             return False
-        if self._llm_budget_remaining() <= self.llm_reserved_for_articles:
-            return False
-        return heuristic_score >= (self._MIN_RELEVANCE_SCORE - self._LLM_FILTER_SCORE_BUFFER)
+        return self._llm_budget_remaining() > self.llm_reserved_for_articles
 
-    def _llm_filter_decision(
-        self,
-        *,
-        title: str,
-        summary: str,
-        content: str,
-        heuristic_score: int,
-        run: Optional[AgentRun],
-        source_name: str,
-        source_url: str,
-        item_url: str,
-    ) -> Optional[dict]:
+    def _llm_filter_batch(self, run: Optional[AgentRun], candidates: list[dict]) -> dict[int, bool]:
+        """Accept/reject by LLM, many items per request; index -> accepted.
+
+        Items left without a decision (cap reached, budget spent, bad output)
+        fall back to the heuristic score at the call site.
+        """
+        decisions: dict[int, bool] = {}
+        if not candidates or not self._llm_filter_available(run):
+            return decisions
         template = (self.config.filter_prompt_template or "").strip()
-        if not template:
-            return None
-
-        prompt = (
-            template.replace("{title}", self._compact_text(title, 260))
-            .replace("{summary}", self._compact_text(summary, 380))
-            .replace("{content}", self._compact_text(content, self._LLM_FILTER_CONTEXT_CHARS))
-            .replace("{heuristic_score}", str(int(heuristic_score)))
-        )
-        output = self._budgeted_generate_json(
-            prompt,
-            run=run,
-            purpose="filter_decision",
-            reserve=self.llm_reserved_for_articles,
-        )
-        if not isinstance(output, dict):
-            return None
-
-        decision = str(output.get("decision") or "").strip().lower()
-        accepted_values = {"accept", "accepted", "include", "relevant", "yes", "allow"}
-        rejected_values = {"reject", "rejected", "exclude", "irrelevant", "no", "drop"}
-        if decision in accepted_values:
-            accepted = True
-        elif decision in rejected_values:
-            accepted = False
-        else:
-            return None
-
-        importance_score = self._normalize_importance_score(output.get("importance_score")) or 1
-        reason = self._compact_text(str(output.get("reason") or ""), 220)
-        confidence_raw = output.get("confidence")
-        try:
-            confidence = float(confidence_raw)
-        except (TypeError, ValueError):
-            confidence = 0.0
-        confidence = max(0.0, min(1.0, confidence))
-
-        if not accepted:
+        size = self._LLM_FILTER_BATCH_SIZE
+        for calls, offset in enumerate(range(0, len(candidates), size)):
+            if calls >= self._LLM_FILTER_MAX_CALLS_PER_RUN:
+                break
+            chunk = candidates[offset : offset + size]
+            block = "\n".join(
+                f"[{i}] ({c['source_name']}) {self._compact_text(c['title'], 220)}\n"
+                f"    {self._compact_text(c['summary'] or c['cleaned'], 320)}"
+                for i, c in enumerate(chunk, 1)
+            )
+            # A custom template without {items} still gets the list appended.
+            prompt = template.replace("{items}", block) if "{items}" in template else f"{template}\n\nItems:\n{block}"
+            output = self._budgeted_generate_json(
+                prompt, run=run, purpose="filter_batch", reserve=self.llm_reserved_for_articles
+            )
+            if not isinstance(output, dict):
+                break  # budget spent or the LLM is failing: the rest uses the heuristic
+            rejected = []
+            for row in output.get("decisions") or []:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    index = int(row.get("id")) - 1
+                except (TypeError, ValueError):
+                    continue
+                decision = str(row.get("decision") or "").strip().lower()
+                if not 0 <= index < len(chunk) or decision not in _ACCEPT | _REJECT:
+                    continue
+                decisions[offset + index] = decision in _ACCEPT
+                if decision in _REJECT:
+                    rejected.append(chunk[index]["title"][:160])
             self._log_event(
                 run=run,
                 step=AgentLogEvent.STEP_NEXT_STEP,
-                message="llm_filter_rejected_item",
+                message="llm_filter_batch_completed",
                 metadata={
-                    "source": source_name,
-                    "source_url": source_url,
-                    "url": item_url,
-                    "heuristic_score": heuristic_score,
-                    "importance_score": importance_score,
-                    "confidence": confidence,
-                    "reason": reason,
+                    "items": len(chunk),
+                    "decided": sum(1 for i in range(offset, offset + len(chunk)) if i in decisions),
+                    "rejected": rejected,
                 },
             )
-
-        return {
-            "accepted": accepted,
-            "importance_score": importance_score,
-            "confidence": confidence,
-            "reason": reason,
-        }
+        return decisions
 
     @staticmethod
     def _normalize_importance_score(value: object) -> Optional[int]:

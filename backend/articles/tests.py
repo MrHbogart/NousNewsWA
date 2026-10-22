@@ -235,3 +235,36 @@ class PriceLabelTests(TestCase):
         AssetSeries.objects.create(symbol="DGS10", label="10Y (no provider, no source)")
         PriceSource.objects.create(name="CoinGecko", symbol="BTC-USD", chart_label="Bitcoin", source_type="api")
         self.assertEqual(enabled_price_source_labels(), {"^GSPC": "S&P 500 Index", "BTC-USD": "Bitcoin"})
+
+
+class ReviewPassApiTests(TestCase):
+    def test_briefs_filter_by_timeframe(self):
+        today = timezone.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        _card(Card.TIMEFRAME_DAY, today - timedelta(days=2), today - timedelta(days=1), "a-day")
+        _card(Card.TIMEFRAME_WEEK, today - timedelta(days=9), today - timedelta(days=2), "a-week")
+        titles = [r["title"] for r in self.client.get("/api/briefs/?timeframe=week").json()["results"]]
+        self.assertEqual(titles, ["a-week"])
+
+    def test_market_overview_reports_last_price_and_change(self):
+        from agent.models import PriceSource
+
+        PriceSource.objects.create(name="g", symbol="XAU", chart_label="Gold")
+        series = AssetSeries.objects.create(symbol="XAU", label="Gold")
+        now = timezone.now().replace(second=0, microsecond=0)
+        for minutes, price in ((120, 100.0), (1, 102.0)):
+            AssetCandle.objects.create(series=series, timestamp=now - timedelta(minutes=minutes), open=price, high=price, low=price, close=price)
+        AssetSeries.objects.create(symbol="EMPTY")  # no data: left out
+        row, = self.client.get("/api/prices/overview/").json()["results"]
+        self.assertEqual((row["label"], row["last"], row["change_pct"], row["is_stale"]), ("Gold", 102.0, 2.0, False))
+        self.assertEqual(row["sparkline"][-1], 102.0)
+
+    def test_series_without_data_in_the_window_get_no_chart(self):
+        from agent.models import PriceSource
+
+        PriceSource.objects.create(name="g", symbol="XAU", chart_label="Gold")
+        series = AssetSeries.objects.create(symbol="XAU", label="Gold")
+        now = timezone.now()
+        card = _card(Card.TIMEFRAME_DAY, now - timedelta(days=2), now - timedelta(days=1), "quiet-day")
+        CardAsset.objects.create(card=card, series=series)
+        body = self.client.get(f"/api/articles/{card.uuid}/").json()
+        self.assertEqual(body["price_series"], [])

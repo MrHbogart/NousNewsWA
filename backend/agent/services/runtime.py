@@ -4,16 +4,20 @@ import threading
 import time
 from typing import Callable, Optional
 
+import psycopg
 from django.db import close_old_connections, connection
 from django.utils import timezone
 
 from agent.models import AgentConfig, AgentLogEvent, AgentRun, AgentWorker
 from agent.price_sync import sync_price_feeds
 from agent.retention import prune_old_data
+from core.db import db_connect_params
 
 from .base import _safe_json_value, get_config
 from .service import AgentService
 
+WORKER_LOCK_ID = 7_301_355_817  # arbitrary, unique to this app
+WORKER_LOCK_RETRY_SECONDS = 15
 HEARTBEAT_STALE_SECONDS = 30
 HEARTBEAT_EVERY_SECONDS = 10
 
@@ -169,9 +173,34 @@ def _price_sync(config: AgentConfig) -> None:
         _log_loop_event("worker_price_sync_failed", level=AgentLogEvent.LEVEL_WARN, metadata={"error": str(exc)[:2000]})
 
 
+def _acquire_worker_lock(sleep: Callable[[float], None]):
+    """Hold a Postgres advisory lock for the worker's lifetime, on its own connection.
+
+    A second replica (scale-out, an overlapping deploy) waits here as a standby
+    instead of running a second news/price loop.
+    """
+    if connection.vendor != "postgresql":
+        return None
+    conn = psycopg.connect(**db_connect_params(), autocommit=True)
+    logged = False
+    while not conn.execute("SELECT pg_try_advisory_lock(%s)", [WORKER_LOCK_ID]).fetchone()[0]:
+        if not logged:
+            _log_loop_event("worker_standby_another_worker_active")
+            logged = True
+        sleep(WORKER_LOCK_RETRY_SECONDS)
+    return conn
+
+
 def run_worker(*, max_iterations: Optional[int] = None, sleep: Callable[[float], None] = time.sleep) -> None:
-    # ponytail: single worker assumed (one compose replica); add a Postgres
-    # advisory lock if this ever runs with more than one replica.
+    lock = _acquire_worker_lock(sleep)
+    try:
+        _run_worker_loop(max_iterations=max_iterations, sleep=sleep)
+    finally:
+        if lock is not None:
+            lock.close()
+
+
+def _run_worker_loop(*, max_iterations: Optional[int], sleep: Callable[[float], None]) -> None:
     now = timezone.now()
     # Runs left "running" by a killed worker would show as running forever.
     AgentRun.objects.filter(status=AgentRun.STATUS_RUNNING).update(

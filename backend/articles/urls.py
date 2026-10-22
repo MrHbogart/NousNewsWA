@@ -1,6 +1,6 @@
 from django.urls import path
 
-from articles.stream import article_stream, home_stream
+from articles.stream import article_stream, home_stream, ticker_stream
 
 from articles.views import (
     ArticleDetailView,
@@ -18,4 +18,5 @@ urlpatterns = [
     path("articles/<str:pk>/", ArticleDetailView.as_view(), name="article-detail"),
     path("stream/home/", home_stream, name="stream-home"),
     path("stream/articles/<str:pk>/", article_stream, name="stream-article"),
+    path("stream/ticker/", ticker_stream, name="stream-ticker"),
 ]

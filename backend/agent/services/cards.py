@@ -55,6 +55,18 @@ class CardsMixin:
                     },
                 )
                 return
+            # Each rewrite costs an LLM call: refresh at most every few minutes,
+            # the block is finalized properly when it closes anyway.
+            main = existing.articles.filter(kind=CardArticle.KIND_MAIN).only("updated_at").first()
+            uses_llm = self.config.use_llm_summaries and self.llm.enabled
+            if uses_llm and main and now - main.updated_at < timedelta(minutes=self._OPEN_CARD_REFRESH_MINUTES):
+                self._log_event(
+                    run=run,
+                    step=AgentLogEvent.STEP_CARD_GENERATION,
+                    message="current_intraday_card_refresh_deferred",
+                    metadata={"item_count": len(records), "last_refresh": main.updated_at},
+                )
+                return
 
         main_payload = self._build_main_payload(
             records=records,

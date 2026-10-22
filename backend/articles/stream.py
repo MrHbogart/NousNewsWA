@@ -24,7 +24,9 @@ from django.db.models import Count, Max, Q
 from django.http import JsonResponse, StreamingHttpResponse
 
 from articles.models import AssetCandle, Card, CardArticle
+from core.db import db_connect_params
 from articles.views import article_payload, briefs_payload, last_hour_payload
+from prices.views import market_overview
 
 logger = logging.getLogger(__name__)
 
@@ -66,14 +68,6 @@ async def _db(fn, *args):
     return await sync_to_async(call, thread_sensitive=False)()
 
 
-def _listen_params() -> dict:
-    s = connection.settings_dict
-    params = {"dbname": s["NAME"], "user": s["USER"], "password": s["PASSWORD"], "host": s["HOST"], "port": s["PORT"]}
-    django_only = ("isolation_level", "server_side_binding", "assume_role", "pool")
-    params.update({k: v for k, v in s.get("OPTIONS", {}).items() if k not in django_only})
-    return {k: v for k, v in params.items() if v not in (None, "")}
-
-
 class _Watcher:
     def __init__(self):
         self.versions = dict.fromkeys(TOPICS, 0)
@@ -97,7 +91,7 @@ class _Watcher:
     async def _listen(self) -> None:
         while True:
             try:
-                async with await psycopg.AsyncConnection.connect(**_listen_params(), autocommit=True) as conn:
+                async with await psycopg.AsyncConnection.connect(**db_connect_params(), autocommit=True) as conn:
                     for topic in TOPICS:
                         await conn.execute(f"LISTEN nousnews_{topic}")
                     for event in self.changed.values():
@@ -230,3 +224,8 @@ async def article_stream(request, pk: str):
         ("article", "content", ("article", pk), article_payload, pk),
         ("prices", "prices", ("article", pk), _article_prices, pk),
     )
+
+
+async def ticker_stream(request):
+    # Site-wide market strip: one small payload per price tick.
+    return _stream_response(("ticker", "prices", "ticker", market_overview))

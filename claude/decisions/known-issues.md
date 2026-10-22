@@ -177,6 +177,23 @@ to a fresh `0001_initial` per app (data was disposable).
   favicons, `og:image`, `NewsArticle` JSON-LD, and About/Disclaimer/
   Privacy/Contact pages (AdSense prerequisites).
 
+## Sources/prices/article pass (2026-10-22)
+
+- Paragraphs were merged into one (`\s{2,}` collapse in `_strip_time_window_phrasing`).
+- LLM filter is batched (25 items/request, max 4 per run) and can't touch the
+  last 30% of the daily budget; open intraday cards are rewritten at most every
+  45 min when the LLM is on.
+- Day/week/month articles are written from their child briefs plus price data;
+  articles use `## ` sections and `- ` lists (rendered by the frontend).
+- 17 free market RSS feeds added (RBA disabled: 403); RDF/Atom feeds parse;
+  teaser items get page text fetched; failing sources back off exponentially.
+- Prices: 10 instruments, one batched yfinance request, gap backfill, ccxt with
+  Yahoo fallback; PriceSources only fill symbols the built-ins didn't serve.
+- API keys may come from env (`PROVIDER_KEY_ENV`, `LLM_API_KEY`); seeded
+  OpenRouter model id / max tokens fixed (migration `agent/0003`).
+- Worker holds a Postgres advisory lock (second replica = standby).
+- New: `/api/prices/overview/`, `/api/stream/ticker/`, `/briefs/?timeframe=`.
+
 ## Open — flagged, not changed
 
 - **No paid/maintained price provider yet.** yfinance and Binance (via ccxt)
@@ -190,5 +207,5 @@ to a fresh `0001_initial` per app (data was disposable).
 - **No structured (JSON) logging** yet.
 - **Economist agent / `MemoryState`** remain behind
   `AGENT_ENABLE_ECONOMIST_AGENT=false` with no tests.
-- **One worker replica assumed.** Running two `agent` containers would run
-  two loops; add a Postgres advisory lock before scaling it.
+- **Article page** still has its own chart code; switch it to `PriceChart.vue`
+  and render `impacts` + `## ` sections via `utils/market.js`.

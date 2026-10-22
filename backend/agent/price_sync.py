@@ -1,13 +1,15 @@
 from __future__ import annotations
 
+import os
 import re
+import time
+import warnings
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from datetime import timezone as dt_timezone
 import logging
 
 import httpx
-from defusedxml import ElementTree as ET
 from dateutil import parser as dtparser
 from django.utils import timezone
 
@@ -29,20 +31,55 @@ logger = logging.getLogger(__name__)
 
 # AssetSeries.symbol -> provider ticker. Only these are requested, so a series
 # a provider can't serve (FRED, Treasury) never costs a failing call.
-YF_SYMBOLS = {"^GSPC": "^GSPC", "DX-Y.NYB": "DX-Y.NYB", "XAUUSD=X": "GC=F"}
+YF_SYMBOLS = {
+    "^GSPC": "^GSPC",
+    "^IXIC": "^IXIC",
+    "DX-Y.NYB": "DX-Y.NYB",
+    "EURUSD=X": "EURUSD=X",
+    "XAUUSD=X": "GC=F",
+    "XAGUSD=X": "SI=F",
+    "CL=F": "CL=F",
+    "^TNX": "^TNX",
+}
+# Crypto comes from an exchange via ccxt (live 1m bars); Yahoo serves it when that fails.
 CCXT_SYMBOLS = {"BTC-USD": "BTC/USDT", "ETH-USD": "ETH/USDT"}
+YF_CRYPTO_FALLBACK = {"BTC-USD": "BTC-USD", "ETH-USD": "ETH-USD"}
+# Binance blocks some regions (HTTP 451); kraken, coinbase or bitstamp also work (USD markets).
+CCXT_EXCHANGE = os.getenv("PRICE_CRYPTO_EXCHANGE", "binance").strip().lower() or "binance"
+CCXT_RETRY_SECONDS = 600
+# Gaps (worker downtime) are refilled up to this far back; Yahoo keeps 1m bars for ~30 days.
+BACKFILL_MAX = timedelta(days=5)
+FRESH_SERIES_HISTORY = timedelta(days=1)
+
+# yfinance trips pandas deprecation warnings on every call; they'd flood the worker log.
+warnings.filterwarnings("ignore", module=r"yfinance(\.|$)")
+
+_ccxt_paused_until = 0.0
 
 
 def sync_price_feeds(*, user_agent: str | None = None) -> PriceFeedStats:
-    """yfinance (indices/FX/gold) and ccxt (crypto) first, then configured PriceSource feeds."""
+    """Built-in providers first (ccxt for crypto, yfinance for the rest), then configured PriceSource feeds.
+
+    A PriceSource only fills a symbol the built-in providers didn't serve this
+    time, so two providers never write into the same candle.
+    """
     stats = PriceFeedStats()
     now = timezone.now()
-    for sync in (_sync_from_yfinance, _sync_from_ccxt):
-        try:
-            sync(stats, now)
-        except Exception as exc:
-            _record_error(stats, f"{sync.__name__}: {exc}")
-    _sync_from_price_sources(stats, now, user_agent)
+    served: set[str] = set()
+    try:
+        served |= _sync_from_ccxt(stats, now)
+    except Exception as exc:
+        _record_error(stats, f"_sync_from_ccxt: {exc}")
+    fallback = {
+        symbol: ticker
+        for symbol, ticker in YF_CRYPTO_FALLBACK.items()
+        if symbol not in served and AssetSeries.objects.filter(symbol=symbol).exists()
+    }
+    try:
+        served |= _sync_from_yfinance(stats, now, extra=fallback)
+    except Exception as exc:
+        _record_error(stats, f"_sync_from_yfinance: {exc}")
+    _sync_from_price_sources(stats, now, user_agent, skip_symbols=served)
     return stats
 
 
@@ -52,6 +89,7 @@ def _record_error(stats: PriceFeedStats, message: str) -> None:
 
 
 def _upsert_candle(series: AssetSeries, timestamp: datetime, open_: float, high: float, low: float, close: float, volume: float) -> None:
+    """Merge a quote into its minute (feeds that report several ticks per minute)."""
     candle, created = AssetCandle.objects.get_or_create(
         series=series,
         timestamp=timestamp,
@@ -65,67 +103,132 @@ def _upsert_candle(series: AssetSeries, timestamp: datetime, open_: float, high:
         candle.save(update_fields=["high", "low", "close", "volume"])
 
 
+def _write_bars(series: AssetSeries, bars: list[tuple]) -> int:
+    """Upsert provider bars (timestamp, open, high, low, close, volume): the provider's bar is authoritative."""
+    rows = [
+        AssetCandle(series=series, timestamp=ts, open=o, high=h, low=lo, close=c, volume=v or 0.0)
+        for ts, o, h, lo, c, v in bars
+        if c and c > 0
+    ]
+    if rows:
+        AssetCandle.objects.bulk_create(
+            rows,
+            update_conflicts=True,
+            unique_fields=["series", "timestamp"],
+            update_fields=["open", "high", "low", "close", "volume", "updated_at"],
+        )
+    return len(rows)
+
+
+def _last_bar_at(series: AssetSeries) -> datetime | None:
+    return AssetCandle.objects.filter(series=series).order_by("-timestamp").values_list("timestamp", flat=True).first()
+
+
 def _yfinance_targets() -> dict[str, str]:
     present = AssetSeries.objects.filter(symbol__in=list(YF_SYMBOLS)).values_list("symbol", flat=True)
     return {symbol: YF_SYMBOLS[symbol] for symbol in present}
 
 
-def _sync_from_yfinance(stats: PriceFeedStats, now: datetime) -> None:
-    targets = _yfinance_targets()
+def _sync_from_yfinance(stats: PriceFeedStats, now: datetime, extra: dict[str, str] | None = None) -> set[str]:
+    targets = {**_yfinance_targets(), **(extra or {})}
     if not targets:
-        return
+        return set()
     import yfinance as yf
 
+    series_by_symbol = {s.symbol: s for s in AssetSeries.objects.filter(symbol__in=list(targets))}
+    last_at = {symbol: _last_bar_at(series) for symbol, series in series_by_symbol.items()}
+    # One request for every ticker, starting at the oldest gap: an idle minute
+    # refetches a couple of bars, a restart refills what was missed.
+    start = min((ts or now - FRESH_SERIES_HISTORY) for ts in last_at.values())
+    start = max(start, now - BACKFILL_MAX) - timedelta(minutes=1)
+    tickers = sorted(set(targets.values()))
+    data = yf.download(
+        tickers, start=start, interval="1m", group_by="ticker", progress=False, threads=False, auto_adjust=False
+    )
     stats.api_feeds_checked += len(targets)
+    served = set()
     for symbol, ticker in targets.items():
+        series = series_by_symbol.get(symbol)
         try:
-            history = yf.Ticker(ticker).history(period="1d", interval="1m")
-            if history is None or history.empty:
+            frame = data[ticker] if ticker in getattr(data.columns, "levels", [[]])[0] else data
+            frame = frame.dropna(subset=["Close"])
+        except (KeyError, TypeError):
+            frame = None
+        if series is None or frame is None or frame.empty:
+            continue  # market closed or nothing new: not an error
+        since = last_at.get(symbol)
+        bars = []
+        for index, row in frame.iterrows():
+            bar_time = index.to_pydatetime().astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
+            if since and bar_time < since:
                 continue
-            series = AssetSeries.objects.get(symbol=symbol)
-            # Last two bars: the previous minute gets its final values once it closes.
-            for index, latest in history.tail(2).iterrows():
-                bar_time = index.to_pydatetime().astimezone(dt_timezone.utc).replace(second=0, microsecond=0)
-                close = _as_float(latest.get("Close"))
-                if close is None or close <= 0:
-                    continue
-                open_value = _as_float(latest.get("Open")) or close
-                high = _as_float(latest.get("High")) or max(open_value, close)
-                low = _as_float(latest.get("Low")) or min(open_value, close)
-                volume = _as_float(latest.get("Volume"), default=0.0) or 0.0
-                _upsert_candle(series, bar_time, open_value, high, low, close, volume)
-                stats.api_prices_recorded += 1
-        except Exception as exc:
-            _record_error(stats, f"yfinance {ticker}: {exc}")
+            close = _as_float(row.get("Close"))
+            if close is None:
+                continue
+            open_value = _as_float(row.get("Open")) or close
+            bars.append(
+                (
+                    bar_time,
+                    open_value,
+                    _as_float(row.get("High")) or max(open_value, close),
+                    _as_float(row.get("Low")) or min(open_value, close),
+                    close,
+                    _as_float(row.get("Volume"), default=0.0),
+                )
+            )
+        recorded = _write_bars(series, bars)
+        stats.api_prices_recorded += recorded
+        if recorded:
+            served.add(symbol)
+    return served
 
 
-def _sync_from_ccxt(stats: PriceFeedStats, now: datetime) -> None:
-    present = list(AssetSeries.objects.filter(symbol__in=list(CCXT_SYMBOLS)).values_list("symbol", flat=True))
-    if not present:
-        return
+def _ccxt_market(symbol: str) -> str:
+    market = CCXT_SYMBOLS[symbol]
+    return market if CCXT_EXCHANGE == "binance" else market.replace("/USDT", "/USD")
+
+
+def _sync_from_ccxt(stats: PriceFeedStats, now: datetime) -> set[str]:
+    global _ccxt_paused_until
+    present = list(AssetSeries.objects.filter(symbol__in=list(CCXT_SYMBOLS)))
+    if not present or time.monotonic() < _ccxt_paused_until:
+        return set()
     import ccxt
 
-    exchange = ccxt.binance()
+    exchange = getattr(ccxt, CCXT_EXCHANGE)()
     stats.api_feeds_checked += len(present)
-    for symbol in present:
-        market = CCXT_SYMBOLS[symbol]
+    served = set()
+    for series in present:
+        market = _ccxt_market(series.symbol)
         try:
-            # Last two bars: the previous minute gets its final values once it closes.
-            ohlcv = exchange.fetch_ohlcv(market, "1m", limit=2)
-            series = AssetSeries.objects.get(symbol=symbol)
-            for ts_ms, open_price, high, low, close, volume in (row[:6] for row in ohlcv or []):
-                if not close or close <= 0:
-                    continue
-                bar_time = datetime.fromtimestamp(ts_ms / 1000, tz=dt_timezone.utc)
-                _upsert_candle(series, bar_time, open_price, high, low, close, volume or 0.0)
-                stats.api_prices_recorded += 1
+            since = _last_bar_at(series)
+            # From the last stored bar (refills gaps 1000 bars per sync); the latest 1000 for a new series.
+            if since:
+                ohlcv = exchange.fetch_ohlcv(market, "1m", since=int(since.timestamp() * 1000), limit=1000)
+            else:
+                ohlcv = exchange.fetch_ohlcv(market, "1m", limit=1000)
+            bars = [
+                (datetime.fromtimestamp(ts_ms / 1000, tz=dt_timezone.utc), o, h, lo, c, v)
+                for ts_ms, o, h, lo, c, v in (row[:6] for row in ohlcv or [])
+            ]
+            recorded = _write_bars(series, bars)
+            stats.api_prices_recorded += recorded
+            if recorded:
+                served.add(series.symbol)
         except Exception as exc:
-            _record_error(stats, f"ccxt {market}: {exc}")
+            # Usually a regional block or outage: Yahoo covers crypto meanwhile,
+            # retry the exchange later instead of failing every sync.
+            _ccxt_paused_until = time.monotonic() + CCXT_RETRY_SECONDS
+            _record_error(stats, f"ccxt {CCXT_EXCHANGE} {market}: {exc}")
+            break
+    return served
 
 
-def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: str | None = None) -> None:
-    """Fallback: sync from configured PriceSource entries (RSS/API)."""
-    sources = list(PriceSource.objects.filter(enabled=True).order_by("name"))
+def _sync_from_price_sources(
+    stats: PriceFeedStats, now: datetime, user_agent: str | None = None, skip_symbols: set[str] = frozenset()
+) -> None:
+    """Configured PriceSource entries (RSS/API), for symbols the built-in providers didn't serve."""
+    sources = list(PriceSource.objects.filter(enabled=True).exclude(symbol__in=skip_symbols).order_by("name"))
     if not sources:
         return
 
@@ -149,7 +252,7 @@ def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: s
                 if source.source_type == PriceSource.SOURCE_RSS:
                     items = _fetch_rss_items(client, source)
                 elif source.source_type == PriceSource.SOURCE_API:
-                    if (source.api_key_param or source.api_key_header) and not (source.api_key or "").strip():
+                    if source.requires_api_key and not source.resolved_api_key:
                         raise RuntimeError("missing_api_key")
                     items = _fetch_api_items(client, source)
                 else:
@@ -179,63 +282,14 @@ def _sync_from_price_sources(stats: PriceFeedStats, now: datetime, user_agent: s
 
 
 def _fetch_rss_items(client: httpx.Client, source: PriceSource) -> list[dict]:
-    """Fetch items from RSS feed."""
+    from agent.services.fetching import parse_feed  # lazy: agent.services imports this module
+
     response = client.get(source.base_url)
     response.raise_for_status()
-    items: list[dict] = []
-    try:
-        root = ET.fromstring(response.text)
-        for item in root.findall(".//item"):
-            title = (item.findtext("title") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            content_encoded = ""
-            for child in list(item):
-                if isinstance(child.tag, str) and child.tag.endswith("encoded"):
-                    content_encoded = (child.text or "").strip()
-                    break
-            pub_date = (item.findtext("pubDate") or "").strip()
-            items.append(
-                {
-                    "title": title,
-                    "description": content_encoded or description,
-                    "published_at": _parse_datetime(pub_date),
-                }
-            )
-
-        for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry") + root.findall(".//entry"):
-            title = (
-                entry.findtext("{http://www.w3.org/2005/Atom}title")
-                or entry.findtext("title")
-                or ""
-            ).strip()
-            summary = (
-                entry.findtext("{http://www.w3.org/2005/Atom}summary")
-                or entry.findtext("summary")
-                or ""
-            ).strip()
-            content = (
-                entry.findtext("{http://www.w3.org/2005/Atom}content")
-                or entry.findtext("content")
-                or summary
-                or title
-            ).strip()
-            published = (
-                entry.findtext("{http://www.w3.org/2005/Atom}updated")
-                or entry.findtext("{http://www.w3.org/2005/Atom}published")
-                or entry.findtext("updated")
-                or entry.findtext("published")
-                or ""
-            ).strip()
-            items.append(
-                {
-                    "title": title,
-                    "description": content,
-                    "published_at": _parse_datetime(published),
-                }
-            )
-    except Exception:
-        pass
-    return items
+    return [
+        {"title": item["title"], "description": item["content"], "published_at": _parse_datetime(item["published"])}
+        for item in parse_feed(response.text)
+    ]
 
 
 def _fetch_api_items(client: httpx.Client, source: PriceSource) -> list[dict]:
@@ -243,10 +297,11 @@ def _fetch_api_items(client: httpx.Client, source: PriceSource) -> list[dict]:
     params: dict[str, str] = {}
     headers: dict[str, str] = {}
 
-    if source.api_key_param and source.api_key:
-        params[source.api_key_param] = source.api_key
-    if source.api_key_header and source.api_key:
-        headers[source.api_key_header] = source.api_key
+    api_key = source.resolved_api_key
+    if source.api_key_param and api_key:
+        params[source.api_key_param] = api_key
+    if source.api_key_header and api_key:
+        headers[source.api_key_header] = api_key
     if source.symbol_param and source.symbol:
         params[source.symbol_param] = source.symbol
 

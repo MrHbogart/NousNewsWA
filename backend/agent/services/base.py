@@ -71,7 +71,13 @@ class AgentServiceCore:
     _AFTERMATH_MAX_AGE_DAYS = int(getattr(settings, "AGENT_AFTERMATH_MAX_AGE_DAYS", 7))
     _MAX_AGGREGATE_BACKFILL_PERIODS = int(getattr(settings, "AGENT_MAX_AGGREGATE_BACKFILL_PERIODS", 16))
     _LLM_FILTER_SCORE_BUFFER = int(getattr(settings, "AGENT_LLM_FILTER_SCORE_BUFFER", 2))
-    _LLM_FILTER_CONTEXT_CHARS = int(getattr(settings, "AGENT_LLM_FILTER_CONTEXT_CHARS", 1800))
+    _LLM_FILTER_BATCH_SIZE = 25
+    _LLM_FILTER_MAX_CALLS_PER_RUN = int(getattr(settings, "AGENT_LLM_FILTER_MAX_CALLS_PER_RUN", 4))
+    # Share of the daily LLM budget the filter never touches, so articles keep getting written.
+    _LLM_ARTICLE_SHARE = 0.3
+    _FULLTEXT_MAX_PER_RUN = int(getattr(settings, "AGENT_FULLTEXT_MAX_PER_RUN", 15))
+    # An open intraday brief is rewritten at most this often (each rewrite is an LLM call).
+    _OPEN_CARD_REFRESH_MINUTES = int(getattr(settings, "AGENT_OPEN_CARD_REFRESH_MINUTES", 45))
     _LLM_RESERVED_FOR_ARTICLES = max(0, int(getattr(settings, "AGENT_LLM_RESERVED_FOR_ARTICLES", 2)))
     _ENABLE_ECONOMIST_AGENT = str(getattr(settings, "AGENT_ENABLE_ECONOMIST_AGENT", "false")).strip().lower() in {
         "1",
@@ -109,7 +115,10 @@ class AgentServiceCore:
         self.ingest_lookback_hours = max(1, int(getattr(settings, "AGENT_INGEST_LOOKBACK_HOURS", 24)))
         self._current_run_min_published_at: Optional[datetime] = None
         self.llm_request_budget = self._remaining_daily_llm_budget()
-        self.llm_reserved_for_articles = int(self._LLM_RESERVED_FOR_ARTICLES)
+        self.llm_reserved_for_articles = max(
+            int(self._LLM_RESERVED_FOR_ARTICLES),
+            int(self.config.llm_daily_request_budget * self._LLM_ARTICLE_SHARE),
+        )
         self.llm_requests_used = 0
         self._llm_budget_exhausted_logged = False
         self.economist_agent_enabled = bool(self._ENABLE_ECONOMIST_AGENT)

@@ -99,13 +99,16 @@ def visible_final_articles(kinds=(CardArticle.KIND_MAIN,)):
     return qs
 
 
-def briefs_payload(page: int = 0, limit: int = 10) -> dict:
+def briefs_payload(page: int = 0, limit: int = 10, timeframe: str = "") -> dict:
     limit = max(1, min(limit, 100))
     page = max(page, 0)
+    articles = visible_final_articles()
+    if timeframe in dict(Card.TIMEFRAME_CHOICES):
+        articles = articles.filter(card__timeframe=timeframe)
     # Newest period end first; when periods end together the wider timeframe
     # (month > week > day > intraday) comes first.
     all_articles = (
-        visible_final_articles()
+        articles
         .annotate(
             timeframe_order=Case(
                 When(card__timeframe=Card.TIMEFRAME_INTRADAY, then=Value(1)),
@@ -137,7 +140,7 @@ class BriefListView(APIView):
             limit = int(request.query_params.get("limit", 10))
         except (ValueError, TypeError):
             page, limit = 0, 10
-        return Response(briefs_payload(page, limit))
+        return Response(briefs_payload(page, limit, request.query_params.get("timeframe", "")))
 
 
 def sitemap_payload() -> list[dict]:

@@ -152,6 +152,8 @@ LOGGING = {
         "handlers": ["console"],
         "level": os.getenv("DJANGO_LOG_LEVEL", "INFO"),
     },
+    # httpx logs every request at INFO: hundreds of lines per agent run.
+    "loggers": {"httpx": {"level": "WARNING"}},
 }
 
 AGENT_LLM_TIMEOUT_SECONDS = float(

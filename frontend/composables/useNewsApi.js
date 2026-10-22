@@ -8,9 +8,10 @@ export const useNewsApi = () => {
   const getHealth = () => request('/health/')
   const getLastHour = () => request('/lasthour/')
   const getBriefs = (params = {}) => {
-    const { page = 0, limit = 10 } = params
-    return request('/briefs/', { query: { page, limit } })
+    const { page = 0, limit = 10, timeframe = '' } = params
+    return request('/briefs/', { query: { page, limit, ...(timeframe ? { timeframe } : {}) } })
   }
+  const getMarketOverview = () => request('/prices/overview/')
   const getArticle = (id) => request(`/articles/${id}/`)
 
   return {
@@ -18,5 +19,6 @@ export const useNewsApi = () => {
     getLastHour,
     getBriefs,
     getArticle,
+    getMarketOverview,
   }
 }

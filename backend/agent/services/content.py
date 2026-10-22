@@ -11,8 +11,44 @@ from django.utils.text import slugify
 from agent.economist_agent import EconomistAgent
 from agent.models import AgentLogEvent, AgentRun
 from articles.models import Card, CardArticle
-from articles.services import aggregate_candles, resolve_timeframe
+from articles.services import describe_price_moves, tracked_series
 from articles.slugging import build_article_slug
+
+from .base import _utc_now
+
+CHILD_TIMEFRAME = {
+    Card.TIMEFRAME_DAY: Card.TIMEFRAME_INTRADAY,
+    Card.TIMEFRAME_WEEK: Card.TIMEFRAME_DAY,
+    Card.TIMEFRAME_MONTH: Card.TIMEFRAME_WEEK,
+}
+
+_FORMAT_RULES = (
+    "Plain text with light structure: a section starts with a line '## Heading'; paragraphs are separated by a "
+    "blank line; a list is consecutive lines starting with '- '. No other markdown, no HTML, no tables. "
+    "Do not write timestamps or phrases like 'in this time window'."
+)
+ARTICLE_FORMATS = {
+    Card.TIMEFRAME_INTRADAY: (
+        "250-450 words. Open with a 2-3 sentence lead paragraph (no heading), then 2-4 short sections such as "
+        "'## Central banks', '## Markets' or '## Commodities', using only sections the records support. "
+        + _FORMAT_RULES
+    ),
+    Card.TIMEFRAME_DAY: (
+        "600-900 words: the day's definitive market story. Open with a 2-3 sentence lead paragraph (no heading), "
+        "then sections: '## The big picture', 2-4 topical sections, '## Market moves' (cite the price data), and "
+        "'## What to watch next' (scheduled events or open questions named in the records). " + _FORMAT_RULES
+    ),
+    Card.TIMEFRAME_WEEK: (
+        "700-1000 words reviewing the week. Open with a lead paragraph, then '## The week in brief' (a '- ' list of "
+        "the 4-6 biggest stories), topical sections, '## Market moves' (cite the price data), and "
+        "'## The week ahead'. " + _FORMAT_RULES
+    ),
+    Card.TIMEFRAME_MONTH: (
+        "800-1200 words reviewing the month. Open with a lead paragraph, then '## The month in brief' (a '- ' list), "
+        "topical sections on the main themes, '## Market moves' (cite the price data), and '## Looking ahead'. "
+        + _FORMAT_RULES
+    ),
+}
 
 
 class ContentMixin:
@@ -27,8 +63,11 @@ class ContentMixin:
         period_end: datetime,
         run: Optional[AgentRun],
     ) -> dict:
-        fallback = self._compose_fallback_payload(records, timeframe, period_start, period_end)
-        context = self._build_context_from_records(records, timeframe=timeframe)
+        price_moves = describe_price_moves(tracked_series(), period_start, min(period_end, _utc_now()))
+        fallback = self._compose_fallback_payload(records, timeframe, period_start, period_end, price_moves=price_moves)
+        context = self._build_context_from_records(
+            records, timeframe=timeframe, period_start=period_start, period_end=period_end, price_moves=price_moves
+        )
 
         generated_title = ""
         generated_summary = ""
@@ -213,12 +252,9 @@ class ContentMixin:
         timeframe: str,
         period_start: datetime,
         period_end: datetime,
+        price_moves: str = "",
     ) -> dict:
-        ranked = sorted(
-            records,
-            key=lambda item: item.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )
+        ranked = self._rank_records(records)
 
         title = self._ensure_informative_title("", ranked, timeframe, period_start)
         intro = (
@@ -246,7 +282,10 @@ class ContentMixin:
             "currency positioning, and sector-level equity rotation in the next trading sessions."
         )
 
-        body = "\n\n".join([intro] + detail_sentences + [closing])
+        sections = [intro] + detail_sentences + [closing]
+        if price_moves:
+            sections.append("## Market moves\n" + "\n".join(f"- {line}" for line in price_moves.splitlines()))
+        body = "\n\n".join(sections)
         summary = " ".join([intro] + detail_sentences[:2])
         summary = self._compact_text(summary, 600)
 
@@ -268,6 +307,18 @@ class ContentMixin:
             "importance_score": importance_score,
             "importance_reason": importance_reason,
         }
+
+    def _rank_records(self, records: list[dict]) -> list[dict]:
+        """Most market-relevant first, newest first among equals: picks the no-LLM headline and side stories."""
+        oldest = datetime.min.replace(tzinfo=timezone.utc)
+        return sorted(
+            records,
+            key=lambda item: (
+                self._relevance_score(item.get("cleaned_text") or item.get("summary") or "", item.get("title") or ""),
+                item.get("published_at") or oldest,
+            ),
+            reverse=True,
+        )
 
     def _impact_sentence(self, record: dict) -> str:
         text = (record.get("title") or "") + " " + (record.get("summary") or "") + " " + (record.get("content") or "")
@@ -303,30 +354,68 @@ class ContentMixin:
             impacts.append("Risk sentiment: cross-asset positioning may shift as new macro information is priced in.")
         return impacts[:6]
 
-    def _build_context_from_records(self, records: list[dict], *, timeframe: str) -> str:
+    def _build_context_from_records(
+        self,
+        records: list[dict],
+        *,
+        timeframe: str,
+        period_start: Optional[datetime] = None,
+        period_end: Optional[datetime] = None,
+        price_moves: str = "",
+    ) -> str:
+        sections = []
+        if price_moves:
+            sections.append(f"Price data for this period (UTC):\n{price_moves}")
+        if period_start and period_end:
+            briefs = self._child_briefs_context(timeframe, period_start, period_end)
+            if briefs:
+                sections.append(f"Briefs already published within this period, oldest first:\n\n{briefs}")
+        # Short briefs get each record's detail; longer periods have their
+        # child briefs above, so a headline and teaser per record leaves room for more of them.
+        detail_chars = 1500 if timeframe == Card.TIMEFRAME_INTRADAY else 300
         chunks = []
         for item in records:
             title = (item.get("title") or "").strip()
-            summary = (item.get("summary") or "").strip()
-            content = (item.get("cleaned_text") or item.get("content") or "").strip()
+            summary = self._compact_text(item.get("summary") or "", 400)
+            content = self._compact_text(item.get("cleaned_text") or item.get("content") or "", detail_chars)
             source = (item.get("source_name") or "unknown").strip()
             url = (item.get("url") or "").strip()
-            piece = f"({source}) {title}\nSummary: {summary}\nDetails: {content}\nURL: {url}"
-            chunks.append(piece)
-        combined = "\n\n".join(chunks)
-        # Every timeframe is capped: an uncapped busy hour/day overflowed the
+            details = f"\nDetails: {content}" if content and content != summary else ""
+            chunks.append(f"({source}) {title}\nSummary: {summary}{details}\nURL: {url}")
+        if chunks:
+            sections.append("News records, newest first:\n\n" + "\n\n".join(chunks))
+        combined = "\n\n".join(sections)
+        # Every timeframe is capped: an uncapped busy period overflowed the
         # model context, so the call failed and still spent budget.
         max_chars = int(self.config.max_context_chars or 0)
         if max_chars > 0:
             combined = combined[:max_chars]
         return combined
 
-    def _build_side_articles(self, records: list[dict]) -> list[dict]:
-        ranked = sorted(
-            records,
-            key=lambda item: item.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
+    def _child_briefs_context(self, timeframe: str, period_start: datetime, period_end: datetime) -> str:
+        """A day is written from its 4-hour briefs, a week from its days, a month from its weeks."""
+        child = CHILD_TIMEFRAME.get(timeframe)
+        if child is None:
+            return ""
+        articles = (
+            CardArticle.objects.filter(
+                kind=CardArticle.KIND_MAIN,
+                card__timeframe=child,
+                card__status=Card.STATUS_FINAL,
+                card__period_start__gte=period_start,
+                card__period_start__lt=period_end,
+            )
+            .select_related("card")
+            .order_by("card__period_start")
         )
+        return "\n\n".join(
+            f"[{article.card.period_start:%a %d %b %H:%M} UTC] {article.title}\n"
+            f"{article.summary}\n{self._compact_text(article.body, 1800)}"
+            for article in articles
+        )
+
+    def _build_side_articles(self, records: list[dict]) -> list[dict]:
+        ranked = self._rank_records(records)
         payloads = []
         for entry in ranked[1:3]:
             title = self._compact_text(
@@ -403,7 +492,8 @@ class ContentMixin:
         for pattern, replacement in replacements:
             cleaned = re.sub(pattern, replacement, cleaned, flags=re.IGNORECASE)
 
-        cleaned = re.sub(r"\s{2,}", " ", cleaned)
+        # Spaces/tabs only: collapsing all whitespace merged every paragraph into one.
+        cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
         cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
         return cleaned.strip()
 
@@ -418,11 +508,7 @@ class ContentMixin:
         if value and not self._is_generic_title(value):
             return value
 
-        ranked = sorted(
-            records,
-            key=lambda item: item.get("published_at") or datetime.min.replace(tzinfo=timezone.utc),
-            reverse=True,
-        )
+        ranked = self._rank_records(records)
 
         for item in ranked:
             headline = self._compact_text(item.get("title") or item.get("summary") or "", 120)
@@ -490,48 +576,16 @@ class ContentMixin:
         period_end: datetime,
     ) -> str:
         template = self.config.article_prompt_template or "{context}"
-        guardrails = (
-            "You are an institutional financial journalist. "
-            "Write as a human market reporter, not as a template or machine-generated bulletin. "
-            "Write in clear, professional English and keep explanations straightforward. "
-            "Include only events with direct or indirect impact on financial markets. "
-            "Reject sports, entertainment, celebrity, lifestyle, and unrelated local stories. "
-            "Do NOT write explicit timestamps or phrases like 'in this time window' in the article body. "
-            "Return plain text only; do not output HTML tags, markdown formatting, social embeds, or XML fragments. "
-            "Focus on what happened, why it matters, and likely market implications. "
-            "Return JSON with keys: title, summary, article_text, impacts, importance_score, importance_reason, references."
-        )
         body = template.replace("{context}", context)
-        return f"{guardrails}\n\nSource records:\n{body}"
+        return f"{body}\n\nFormat instructions for article_text:\n{ARTICLE_FORMATS.get(timeframe, ARTICLE_FORMATS[Card.TIMEFRAME_INTRADAY])}"
 
     def _describe_price_moves(self, card: Card, window_end: datetime) -> str:
-        """Factual open/close/range summary per tracked asset since card.period_end. Empty string if no candle data yet."""
-        interval_minutes, _, _ = resolve_timeframe(card.timeframe)
-        span_minutes = max(1, int((window_end - card.period_end).total_seconds() // 60))
-        max_buckets = max(1, -(-span_minutes // max(1, interval_minutes)))
-
-        lines: list[str] = []
-        for asset in card.assets.select_related("series").order_by("series__symbol"):
-            candles = aggregate_candles(
-                series=asset.series,
-                start=card.period_end,
-                end=window_end,
-                interval_minutes=interval_minutes,
-                max_buckets=max_buckets,
-            )
-            if not candles:
-                continue
-            label = asset.label or asset.series.label or asset.series.symbol
-            open_price = candles[0]["open"]
-            close_price = candles[-1]["close"]
-            high = max(c["high"] for c in candles)
-            low = min(c["low"] for c in candles)
-            pct_change = ((close_price - open_price) / open_price * 100) if open_price else 0.0
-            lines.append(
-                f"{label}: opened at {open_price:.2f}, closed at {close_price:.2f} "
-                f"({pct_change:+.2f}%), range {low:.2f}-{high:.2f}."
-            )
-        return "\n".join(lines)
+        """Factual open/last/range summary per tracked asset since card.period_end. Empty string if no candle data yet."""
+        assets = [
+            (asset.series, asset.label or asset.series.label or asset.series.symbol)
+            for asset in card.assets.select_related("series").order_by("series__symbol")
+        ]
+        return describe_price_moves(assets, card.period_end, window_end)
 
     def _build_aftermath_payload(
         self,

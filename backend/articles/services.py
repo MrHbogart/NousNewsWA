@@ -3,6 +3,8 @@ from __future__ import annotations
 from datetime import timedelta
 from types import SimpleNamespace
 
+from django.db.models import Max, Min
+
 from agent.models import PriceSource
 from articles.models import AssetCandle, AssetSeries
 
@@ -37,6 +39,49 @@ def enabled_price_source_labels() -> dict[str, str]:
             symbol_labels[symbol] = label
             explicit_labels[symbol] = explicit
     return symbol_labels
+
+
+def tracked_series() -> list[tuple[AssetSeries, str]]:
+    """(series, chart label) for every series that gets price data, by symbol."""
+    labels = enabled_price_source_labels()
+    return [(series, labels[series.symbol]) for series in AssetSeries.objects.filter(symbol__in=labels).order_by("symbol")]
+
+
+def format_price(value: float) -> str:
+    # FX quotes need 4 decimals; indices, gold and crypto read better with 2.
+    return f"{value:,.4f}" if abs(value) < 10 else f"{value:,.2f}"
+
+
+def price_move(series: AssetSeries, start, end) -> dict | None:
+    """First open, last close, range and % change of a series in [start, end); None without data."""
+    qs = AssetCandle.objects.filter(series=series, timestamp__gte=start, timestamp__lt=end)
+    first = qs.order_by("timestamp").values_list("open", flat=True).first()
+    if first is None:
+        return None
+    last = qs.order_by("-timestamp").values_list("close", "timestamp").first()
+    bounds = qs.aggregate(high=Max("high"), low=Min("low"))
+    return {
+        "open": first,
+        "close": last[0],
+        "high": bounds["high"],
+        "low": bounds["low"],
+        "change_pct": (last[0] - first) / first * 100 if first else 0.0,
+        "last_at": last[1],
+    }
+
+
+def describe_price_moves(assets: list[tuple[AssetSeries, str]], start, end) -> str:
+    """One factual line per asset with data in the window, for LLM prompts and fallback text."""
+    lines = []
+    for series, label in assets:
+        move = price_move(series, start, end)
+        if move is None:
+            continue
+        lines.append(
+            f"{label}: opened at {format_price(move['open'])}, last {format_price(move['close'])} "
+            f"({move['change_pct']:+.2f}%), range {format_price(move['low'])}-{format_price(move['high'])}."
+        )
+    return "\n".join(lines)
 
 
 INTRADAY_HOURS = 4

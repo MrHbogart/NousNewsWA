@@ -66,6 +66,8 @@ class PriceSeriesMixin:
                 interval_minutes=interval_minutes,
                 max_buckets=max_buckets,
             )
+            if not candles:
+                continue  # no data in this window (market closed, monthly series): no empty chart tab
             formatted_candles = [
                 {
                     "timestamp": c["timestamp"].strftime("%Y-%m-%d %H:%M"),

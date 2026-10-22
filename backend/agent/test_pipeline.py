@@ -221,6 +221,9 @@ class CardLifecycleTests(TestCase):
 
 
 class LlmAndPriceFeedTests(TestCase):
+    def setUp(self):
+        price_sync._ccxt_paused_until = 0.0  # module state: an earlier failure pauses ccxt
+
     def test_daily_llm_budget_counts_earlier_runs_today(self):
         config = AgentConfig.objects.create(llm_daily_request_budget=4)
         AgentRun.objects.create(status=AgentRun.STATUS_DONE, llm_requests=3)
@@ -282,7 +285,7 @@ class LlmAndPriceFeedTests(TestCase):
         stats = price_sync.PriceFeedStats()
         with mock.patch.dict(sys.modules, {"ccxt": fake_ccxt}):
             price_sync._sync_from_ccxt(stats, timezone.now())
-        exchange.fetch_ohlcv.assert_called_once_with("BTC/USDT", "1m", limit=2)
+        exchange.fetch_ohlcv.assert_called_once_with("BTC/USDT", "1m", limit=1000)
         candle = AssetCandle.objects.get()
         self.assertEqual(candle.timestamp, datetime.fromtimestamp(bar_ms / 1000, tz=dt_timezone.utc))
         self.assertEqual(candle.close, 1.5)
@@ -415,3 +418,211 @@ class ProductionReviewFixTests(TestCase):
         orphan.refresh_from_db()
         self.assertEqual(orphan.status, AgentRun.STATUS_FAILED)
         self.assertIsNotNone(orphan.ended_at)
+
+
+class IngestionTests(TestCase):
+    def setUp(self):
+        from agent.models import NewsSource
+
+        self.config = AgentConfig.objects.create(llm_api_key="k", use_llm_summaries=False, llm_daily_request_budget=100)
+        self.source = NewsSource.objects.create(name="Wire", base_url="https://wire.example/rss", source_type="rss")
+        self.service = AgentService(config=self.config)
+        self.published = timezone.now() - timedelta(minutes=5)
+
+    def tearDown(self):
+        self.service.close()
+
+    def _item(self, slug, title, text):
+        return {"title": title, "summary": text, "content": text, "url": f"https://wire.example/{slug}", "published_at": self.published}
+
+    def test_feed_parser_reads_rdf_and_atom(self):
+        from agent.services.fetching import parse_feed
+
+        rdf = """<?xml version="1.0"?>
+        <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns="http://purl.org/rss/1.0/"
+                 xmlns:dc="http://purl.org/dc/elements/1.1/">
+          <item rdf:about="https://boj.example/a"><title>BoJ statement</title>
+            <link>https://boj.example/a</link><dc:date>2026-10-21T09:00:00+09:00</dc:date></item>
+        </rdf:RDF>"""
+        atom = """<feed xmlns="http://www.w3.org/2005/Atom"><entry><title>ECB speech</title>
+            <link rel="enclosure" href="https://ecb.example/a.pdf"/><link href="https://ecb.example/a"/>
+            <updated>2026-10-21T10:00:00Z</updated><summary>Rates</summary></entry></feed>"""
+        self.assertEqual(
+            [(i["title"], i["url"], i["published"]) for i in parse_feed(rdf) + parse_feed(atom)],
+            [("BoJ statement", "https://boj.example/a", "2026-10-21T09:00:00+09:00"),
+             ("ECB speech", "https://ecb.example/a", "2026-10-21T10:00:00Z")],
+        )
+
+    def test_llm_batch_filter_decides_and_heuristic_covers_the_rest(self):
+        from agent.services.base import SourceFetchResult
+        from dataset.models import RawNewsItem
+
+        items = [
+            self._item("rejected", "Fed raises interest rates", RELEVANT_TEXT),
+            self._item("rescued", "Shipping firm reroutes vessels around canal", "Shipping firm reroutes vessels."),
+            self._item("undecided", "ECB inflation decision moves bond yields", RELEVANT_TEXT),
+            self._item("junk", "Celebrity wedding album", "A celebrity wedding."),
+        ]
+        reply = {"decisions": [{"id": 1, "decision": "reject"}, {"id": 2, "decision": "accept"}]}
+        run = AgentRun.objects.create()
+        with mock.patch.object(self.service, "_fetch_source_batch", return_value=SourceFetchResult(self.source.id, items, 5)), \
+             mock.patch.object(self.service, "_relevance_score", side_effect=lambda text, title: 2 if "Shipping" in title else (-5 if "Celebrity" in title else 10)), \
+             mock.patch.object(self.service, "_enrich_full_text", return_value=0), \
+             mock.patch.object(self.service.llm, "generate_json", return_value=reply) as llm:
+            stats = self.service._fetch_and_store_sources(run)
+        self.assertEqual(llm.call_count, 1)  # one request for the whole batch
+        prompt = llm.call_args[0][0]
+        self.assertIn("[1] (Wire) Fed raises", prompt)
+        self.assertNotIn("Celebrity", prompt)  # below the review floor: never sent
+        stored = set(RawNewsItem.objects.values_list("url", flat=True))
+        self.assertEqual(stored, {"https://wire.example/rescued", "https://wire.example/undecided"})
+        self.assertEqual((stats.items_seen, stats.items_saved, stats.items_rejected), (4, 2, 2))
+
+    def test_filter_leaves_a_share_of_the_daily_budget_to_articles(self):
+        self.assertEqual(self.service.llm_reserved_for_articles, 30)
+        self.service.llm_requests_used = 70
+        self.assertFalse(self.service._llm_filter_available(AgentRun.objects.create()))
+
+    def test_failing_source_backs_off_longer_each_time(self):
+        self.service._record_source_error(self.source, "http_500")
+        first = self.source.backoff_until
+        self.service._record_source_error(self.source, "http_500")
+        self.assertGreater(self.source.backoff_until - first, timedelta(minutes=10))
+
+    def test_article_text_is_extracted_from_paragraphs(self):
+        from agent.services.fetching import extract_article_text
+
+        para = "The central bank held rates steady while signalling that inflation risks remain elevated. " * 2
+        html = f"<html><nav><p>{'menu ' * 30}</p></nav><article><p>{para}</p><p>{para}</p><p>{para}</p></article></html>"
+        text = extract_article_text(html)
+        self.assertIn("central bank held rates", text)
+        self.assertNotIn("menu", text)
+        self.assertEqual(extract_article_text("<p>short</p>"), "")
+
+
+class ArticleCompositionTests(TestCase):
+    def setUp(self):
+        from articles.models import AssetCandle, AssetSeries
+
+        self.config = AgentConfig.objects.create(use_llm_summaries=False)
+        self.service = AgentService(config=self.config)
+        self.day = (timezone.now() - timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+        PriceSource.objects.create(name="g", symbol="XAU", chart_label="Gold")
+        series = AssetSeries.objects.create(symbol="XAU", label="Gold")
+        for minutes, price in ((60, 2400.0), (600, 2430.0)):
+            AssetCandle.objects.create(
+                series=series, timestamp=self.day + timedelta(minutes=minutes), open=price, high=price + 5, low=price - 5, close=price
+            )
+
+    def tearDown(self):
+        self.service.close()
+
+    def test_paragraph_breaks_survive_cleanup(self):
+        text = self.service._strip_time_window_phrasing("Lead  paragraph.\n\n## Markets\n- Gold rose.")
+        self.assertEqual(text, "Lead paragraph.\n\n## Markets\n- Gold rose.")
+
+    def test_day_context_has_child_briefs_and_price_data(self):
+        from articles.models import Card, CardArticle
+
+        block = Card.objects.create(
+            timeframe=Card.TIMEFRAME_INTRADAY, period_start=self.day + timedelta(hours=8),
+            period_end=self.day + timedelta(hours=12), status=Card.STATUS_FINAL, slug="b",
+        )
+        CardArticle.objects.create(card=block, kind="main", uuid=block.uuid, title="Gold climbs on Fed bets", summary="S", body="B")
+        from articles.services import describe_price_moves, tracked_series
+
+        price_moves = describe_price_moves(tracked_series(), self.day, self.day + timedelta(days=1))
+        self.assertIn("Gold: opened at 2,400.00, last 2,430.00 (+1.25%)", price_moves)
+        context = self.service._build_context_from_records(
+            [], timeframe=Card.TIMEFRAME_DAY, period_start=self.day, period_end=self.day + timedelta(days=1), price_moves=price_moves
+        )
+        self.assertIn("Gold climbs on Fed bets", context)
+        self.assertIn("+1.25%", context)
+
+    def test_prompt_asks_for_the_timeframe_format(self):
+        prompt = self.service._build_article_prompt("ctx", "day", self.day, self.day)
+        self.assertIn("600-900 words", prompt)
+        self.assertIn("ctx", prompt)
+
+    def test_fallback_body_lists_market_moves(self):
+        payload = self.service._compose_fallback_payload([], "day", self.day, self.day, price_moves="Gold: up")
+        self.assertIn("## Market moves\n- Gold: up", payload["body"])
+
+
+class PriceProviderTests(TestCase):
+    def setUp(self):
+        price_sync._ccxt_paused_until = 0.0
+
+    def test_yfinance_writes_new_bars_in_one_batch_request(self):
+        import pandas as pd
+
+        from articles.models import AssetCandle, AssetSeries
+
+        gold = AssetSeries.objects.create(symbol="XAUUSD=X")
+        now = timezone.now().replace(second=0, microsecond=0)
+        AssetCandle.objects.create(series=gold, timestamp=now - timedelta(minutes=2), open=1, high=1, low=1, close=1)
+        index = pd.DatetimeIndex([now - timedelta(minutes=m) for m in (3, 2, 1)])
+        frame = pd.DataFrame(
+            {"Open": [9, 10, 11], "High": [9, 12, 13], "Low": [9, 9, 10], "Close": [9, 11, 12], "Volume": [0, 5, 6]}, index=index
+        )
+        data = pd.concat({"GC=F": frame}, axis=1)
+        fake_yf = mock.Mock(download=mock.Mock(return_value=data))
+        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}):
+            served = price_sync._sync_from_yfinance(price_sync.PriceFeedStats(), timezone.now())
+        self.assertEqual(served, {"XAUUSD=X"})
+        fake_yf.download.assert_called_once()
+        closes = list(AssetCandle.objects.filter(series=gold).order_by("timestamp").values_list("close", flat=True))
+        self.assertEqual(closes, [11.0, 12.0])  # the older bar before the last stored one is skipped
+
+    def test_price_sources_skip_symbols_the_providers_served(self):
+        PriceSource.objects.create(name="cg", symbol="BTC-USD", source_type=PriceSource.SOURCE_API, base_url="https://cg.example/p")
+        stats = price_sync.PriceFeedStats()
+        with mock.patch.object(price_sync, "_fetch_api_items") as fetch:
+            price_sync._sync_from_price_sources(stats, timezone.now(), skip_symbols={"BTC-USD"})
+        fetch.assert_not_called()
+
+    def test_crypto_falls_back_to_yahoo_when_the_exchange_fails(self):
+        from articles.models import AssetSeries
+
+        AssetSeries.objects.create(symbol="BTC-USD")
+        with mock.patch.object(price_sync, "_sync_from_ccxt", return_value=set()), \
+             mock.patch.object(price_sync, "_sync_from_yfinance", return_value=set()) as yf:
+            price_sync.sync_price_feeds()
+        self.assertEqual(yf.call_args.kwargs["extra"], {"BTC-USD": "BTC-USD"})
+
+    def test_env_api_key_is_used_and_enables_seeded_source(self):
+        from agent.models import NewsSource
+
+        with mock.patch.dict("os.environ", {"FINNHUB_API_KEY": "secret"}):
+            call_command("seed_sources", verbosity=0)
+            finnhub = NewsSource.objects.get(base_url="https://finnhub.io/api/v1/news")
+            self.assertEqual(finnhub.resolved_api_key, "secret")
+        self.assertTrue(finnhub.enabled)
+        self.assertFalse(NewsSource.objects.get(base_url="https://newsapi.org/v2/everything").enabled)
+
+
+class WorkerLockTests(TestCase):
+    def test_second_worker_waits_while_the_lock_is_held(self):
+        import psycopg
+
+        from agent.models import AgentLogEvent
+        from agent.services import runtime
+        from core.db import db_connect_params
+
+        AgentConfig.objects.create()
+        holder = psycopg.connect(**db_connect_params(), autocommit=True)
+        holder.execute("SELECT pg_advisory_lock(%s)", [runtime.WORKER_LOCK_ID])
+        waits = []
+
+        def sleep(seconds):
+            waits.append(seconds)
+            holder.close()  # the active worker goes away
+
+        try:
+            with mock.patch.object(runtime, "prune_old_data", return_value={}), \
+                 mock.patch.object(runtime, "close_old_connections"):
+                runtime.run_worker(max_iterations=1, sleep=sleep)
+        finally:
+            holder.close()
+        self.assertEqual(waits[0], runtime.WORKER_LOCK_RETRY_SECONDS)
+        self.assertTrue(AgentLogEvent.objects.filter(message="worker_standby_another_worker_active").exists())

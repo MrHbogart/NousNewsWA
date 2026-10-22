@@ -5,6 +5,7 @@ import hashlib
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from urllib.parse import urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -16,6 +17,69 @@ from agent.models import AgentLogEvent, AgentRun, NewsSource
 from dataset.models import RawNewsItem
 
 from .base import SourceFetchResult, SourceSyncStats, _utc_now
+
+
+FULLTEXT_MIN_CHARS = 500
+FULLTEXT_MAX_CHARS = 6000
+# Pages that never yield article text (JS redirects).
+FULLTEXT_SKIP_HOSTS = {"news.google.com"}
+FULLTEXT_SKIP_EXTENSIONS = (".pdf", ".xls", ".xlsx", ".csv", ".zip", ".doc", ".docx", ".mp4", ".mp3")
+
+
+def _local(tag: object) -> str:
+    return tag.rsplit("}", 1)[-1] if isinstance(tag, str) else ""
+
+
+def _child_text(node, *names: str) -> str:
+    for name in names:
+        for child in node:
+            if _local(child.tag) == name and (child.text or "").strip():
+                return child.text.strip()
+    return ""
+
+
+def parse_feed(xml_text: str) -> list[dict]:
+    """Items of an RSS 2.0, RSS 1.0 (RDF) or Atom feed, whatever namespaces it uses.
+
+    Returns {title, summary, content, url, published} with `published` unparsed.
+    """
+    try:
+        root = ET.fromstring(xml_text)
+    except Exception:
+        return []
+    items = []
+    for node in root.iter():
+        if _local(node.tag) not in ("item", "entry"):
+            continue
+        title = _child_text(node, "title")
+        summary = _child_text(node, "description", "summary")
+        url = ""
+        for child in node:
+            if _local(child.tag) == "link":
+                url = (child.attrib.get("href") or child.text or "").strip()
+                if url and child.attrib.get("rel", "alternate") == "alternate":
+                    break
+        items.append(
+            {
+                "title": title,
+                "summary": summary,
+                "content": _child_text(node, "encoded", "content") or summary or title,
+                "url": url,
+                "published": _child_text(node, "pubDate", "published", "updated", "date", "issued"),
+            }
+        )
+    return items
+
+
+def extract_article_text(html: str) -> str:
+    """Main paragraphs of an article page; "" when it doesn't look like an article."""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript", "nav", "header", "footer", "aside", "form", "figure"]):
+        tag.decompose()
+    root = soup.find("article") or soup.find("main") or soup.body or soup
+    paragraphs = [p.get_text(" ", strip=True) for p in root.find_all("p")]
+    text = "\n\n".join(p for p in paragraphs if len(p) >= 60)
+    return text[:FULLTEXT_MAX_CHARS] if len(text) >= 400 else ""
 
 
 class FetchingMixin:
@@ -79,22 +143,15 @@ class FetchingMixin:
                     },
                 )
                 continue
-
-            self._log_event(
-                run=run,
-                step=AgentLogEvent.STEP_SOURCE_FETCH,
-                message="source_fetch_started",
-                metadata={
-                    "source": source.name,
-                    "source_type": source.source_type,
-                    "source_url": source.base_url,
-                },
-            )
             active_sources.append(source)
 
         if not active_sources:
             return stats
 
+        # 1) Fetch every source concurrently, then run cheap per-item checks.
+        candidates: list[dict] = []
+        per_source: dict[int, dict] = {}
+        seen_keys: set[str] = set()
         workers = max(1, min(len(active_sources), self.source_fetch_workers))
         with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="news-source") as executor:
             futures = {
@@ -114,10 +171,7 @@ class FetchingMixin:
                     )
 
                 if fetched.error:
-                    if fetched.error == "rate_limited":
-                        self._apply_backoff(source, "rate_limited")
-                    else:
-                        self._record_source_error(source, fetched.error)
+                    self._record_source_error(source, fetched.error)
                     self._log_event(
                         run=run,
                         step=AgentLogEvent.STEP_SOURCE_FETCH,
@@ -128,10 +182,22 @@ class FetchingMixin:
                             "source": source.name,
                             "source_url": source.base_url,
                             "duration_ms": fetched.duration_ms,
+                            "failure_count": source.failure_count,
+                            "backoff_until": source.backoff_until,
                         },
                     )
                     continue
 
+                counts = per_source[source.id] = {
+                    "source": source,
+                    "duration_ms": fetched.duration_ms,
+                    "items_seen": 0,
+                    "items_saved": 0,
+                    "items_rejected": 0,
+                    "items_rejected_old": 0,
+                    "items_rejected_llm": 0,
+                    "items_already_stored": 0,
+                }
                 # Items stored by an earlier run: skip before scoring so they
                 # don't spend LLM filter budget again every run.
                 stored_urls = set(
@@ -139,121 +205,157 @@ class FetchingMixin:
                         url__in=[(item.get("url") or "").strip() for item in fetched.items if item.get("url")]
                     ).values_list("url", flat=True)
                 )
-                source_known = 0
-                seen_keys = set()
                 source_latest: Optional[datetime] = None
-                source_seen = 0
-                source_saved = 0
-                source_rejected = 0
-                source_rejected_old = 0
-                source_rejected_llm = 0
-
+                is_aggregator = (urlparse(source.base_url).hostname or "") == "news.google.com"
                 for item in fetched.items:
-                    source_seen += 1
+                    counts["items_seen"] += 1
                     stats.items_seen += 1
-                    if (item.get("url") or "").strip() in stored_urls:
-                        source_known += 1
+                    url = (item.get("url") or "").strip()
+                    if url in stored_urls:
+                        counts["items_already_stored"] += 1
                         continue
 
                     title = (item.get("title") or "").strip()
+                    if is_aggregator:
+                        title = title.rsplit(" - ", 1)[0]  # "Headline - Publisher"
                     summary = (item.get("summary") or "").strip()
                     content = (item.get("content") or "").strip()
-                    raw_text = content or summary or title
-                    cleaned = self._clean_text(raw_text)
-                    if not cleaned:
-                        source_rejected += 1
-                        stats.items_rejected += 1
-                        continue
-
+                    cleaned = self._clean_text(content or summary or title)
                     published_dt = self._parse_datetime(item.get("published_at"))
-                    if not published_dt:
-                        source_rejected += 1
-                        stats.items_rejected += 1
+                    if not cleaned or not published_dt:
+                        counts["items_rejected"] += 1
                         continue
                     if self._current_run_min_published_at and published_dt < self._current_run_min_published_at:
-                        source_rejected += 1
-                        source_rejected_old += 1
-                        stats.items_rejected += 1
+                        counts["items_rejected"] += 1
+                        counts["items_rejected_old"] += 1
                         continue
-
-                    score = self._relevance_score(cleaned, title)
-                    llm_filter = None
-                    if self._should_apply_llm_filter(run, score):
-                        llm_filter = self._llm_filter_decision(
-                            title=title,
-                            summary=summary,
-                            content=cleaned,
-                            heuristic_score=score,
-                            run=run,
-                            source_name=source.name,
-                            source_url=source.base_url,
-                            item_url=(item.get("url") or "").strip(),
-                        )
-                    if llm_filter is not None and not llm_filter.get("accepted", False):
-                        source_rejected += 1
-                        source_rejected_llm += 1
-                        stats.items_rejected += 1
-                        continue
-                    if score < self._MIN_RELEVANCE_SCORE and not (llm_filter and llm_filter.get("accepted", False)):
-                        source_rejected += 1
-                        stats.items_rejected += 1
-                        continue
-
+                    if source_latest is None or published_dt > source_latest:
+                        source_latest = published_dt
+                    # Across sources too: aggregators repeat the same link.
                     dedupe_key = self._dedupe_key(item, title, published_dt)
                     if dedupe_key in seen_keys:
-                        source_rejected += 1
-                        stats.items_rejected += 1
+                        counts["items_rejected"] += 1
                         continue
                     seen_keys.add(dedupe_key)
 
-                    normalized = {
-                        "title": title,
-                        "summary": summary,
-                        "content": content,
-                        "url": (item.get("url") or "").strip(),
-                        "published_at": published_dt,
-                    }
-                    self._store_raw_item(source, normalized, cleaned)
-                    source_saved += 1
-                    stats.items_saved += 1
+                    candidates.append(
+                        {
+                            "source": source,
+                            "source_name": source.name,
+                            "title": title,
+                            "summary": summary,
+                            "content": content,
+                            "cleaned": cleaned,
+                            "url": url,
+                            "published_at": published_dt,
+                            "score": self._relevance_score(cleaned, title),
+                        }
+                    )
 
-                    if source_latest is None or published_dt > source_latest:
-                        source_latest = published_dt
+                self._record_source_success(source, source_latest or now)
 
-                source.last_fetched_at = source_latest or now
-                source.failure_count = 0
-                source.last_error = ""
-                source.backoff_until = None
-                source.save(update_fields=["last_fetched_at", "failure_count", "last_error", "backoff_until"])
+        # 2) Relevance: the LLM judges borderline-and-up items in batches; the
+        # heuristic decides the rest (and everything when the LLM is off or out of budget).
+        floor = self._MIN_RELEVANCE_SCORE - self._LLM_FILTER_SCORE_BUFFER
+        reviewable = [c for c in candidates if c["score"] >= floor]
+        decisions = self._llm_filter_batch(run, reviewable)
+        llm_verdict = {id(c): decisions[i] for i, c in enumerate(reviewable) if i in decisions}
+        accepted = []
+        for candidate in candidates:
+            verdict = llm_verdict.get(id(candidate))
+            counts = per_source[candidate["source"].id]
+            if verdict is False:
+                counts["items_rejected"] += 1
+                counts["items_rejected_llm"] += 1
+            elif verdict or candidate["score"] >= self._MIN_RELEVANCE_SCORE:
+                accepted.append(candidate)
+            else:
+                counts["items_rejected"] += 1
 
-                self._log_event(
-                    run=run,
-                    step=AgentLogEvent.STEP_SOURCE_FETCH,
-                    message="source_fetch_completed",
-                    metadata={
-                        "source": source.name,
-                        "items_seen": source_seen,
-                        "items_saved": source_saved,
-                        "items_rejected": source_rejected,
-                        "items_rejected_old": source_rejected_old,
-                        "items_rejected_llm": source_rejected_llm,
-                        "items_already_stored": source_known,
-                        "min_published_at": self._current_run_min_published_at,
-                        "duration_ms": fetched.duration_ms,
-                    },
-                )
+        # 3) Feeds often carry a one-line teaser: fetch the page for those.
+        enriched = self._enrich_full_text(accepted)
+
+        for candidate in accepted:
+            self._store_raw_item(
+                candidate["source"],
+                {
+                    "title": candidate["title"],
+                    "summary": candidate["summary"],
+                    "content": candidate["content"],
+                    "url": candidate["url"],
+                    "published_at": candidate["published_at"],
+                },
+                candidate["cleaned"],
+            )
+            per_source[candidate["source"].id]["items_saved"] += 1
+            stats.items_saved += 1
+
+        for counts in per_source.values():
+            source = counts.pop("source")
+            stats.items_rejected += counts["items_rejected"]
+            self._log_event(
+                run=run,
+                step=AgentLogEvent.STEP_SOURCE_FETCH,
+                message="source_fetch_completed",
+                metadata={
+                    "source": source.name,
+                    **counts,
+                    "min_published_at": self._current_run_min_published_at,
+                },
+            )
+        if enriched:
+            self._log_event(
+                run=run,
+                step=AgentLogEvent.STEP_SOURCE_FETCH,
+                message="full_text_fetched",
+                metadata={"items": enriched},
+            )
 
         return stats
 
+    def _enrich_full_text(self, candidates: list[dict]) -> int:
+        """Replace teaser text with the article page's text; best effort, capped per run."""
+        targets = [
+            c
+            for c in candidates
+            if len(c["cleaned"]) < FULLTEXT_MIN_CHARS
+            and c["url"].startswith("http")
+            and (urlparse(c["url"]).hostname or "") not in FULLTEXT_SKIP_HOSTS
+            and not urlparse(c["url"]).path.lower().endswith(FULLTEXT_SKIP_EXTENSIONS)
+        ][: self._FULLTEXT_MAX_PER_RUN]
+        if not targets:
+            return 0
+        with ThreadPoolExecutor(max_workers=min(8, len(targets)), thread_name_prefix="full-text") as executor:
+            texts = list(executor.map(self._fetch_article_text, [c["url"] for c in targets]))
+        enriched = 0
+        for candidate, text in zip(targets, texts):
+            if len(text) > len(candidate["cleaned"]):
+                candidate["content"] = candidate["cleaned"] = text
+                enriched += 1
+        return enriched
+
+    def _fetch_article_text(self, url: str) -> str:
+        client = self._build_http_client()
+        try:
+            resp = client.get(url)
+            if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", ""):
+                return ""
+            return extract_article_text(resp.text)
+        except Exception:
+            return ""
+        finally:
+            client.close()
+
     def _fetch_api_source(self, source: NewsSource, *, client: Optional[httpx.Client] = None) -> list[dict]:
-        if (source.api_key_param or source.api_key_header) and not source.api_key:
+        api_key = source.resolved_api_key
+        if source.requires_api_key and not api_key:
             raise RuntimeError("missing_api_key")
         params = {}
         headers = {}
-        if source.api_key_header and source.api_key:
-            headers[source.api_key_header] = source.api_key
-        if source.api_key_param and source.api_key:
-            params[source.api_key_param] = source.api_key
+        if source.api_key_header and api_key:
+            headers[source.api_key_header] = api_key
+        if source.api_key_param and api_key:
+            params[source.api_key_param] = api_key
         if source.query_param and source.query:
             params[source.query_param] = source.query
         if source.language_param and source.language:
@@ -342,67 +444,7 @@ class FetchingMixin:
         return candidates
 
     def _parse_rss_items(self, xml_text: str) -> list[dict]:
-        try:
-            root = ET.fromstring(xml_text)
-        except Exception:
-            return []
-        items = []
-
-        for item in root.findall(".//item"):
-            title = (item.findtext("title") or "").strip()
-            description = (item.findtext("description") or "").strip()
-            content_encoded = ""
-            for child in list(item):
-                if isinstance(child.tag, str) and child.tag.endswith("encoded"):
-                    content_encoded = (child.text or "").strip()
-                    break
-            link = (item.findtext("link") or "").strip()
-            pub_date = (item.findtext("pubDate") or "").strip()
-            items.append(
-                {
-                    "title": title,
-                    "summary": description,
-                    "content": content_encoded or description or title,
-                    "url": link,
-                    "published_at": self._parse_datetime(pub_date),
-                }
-            )
-
-        for entry in root.findall(".//{http://www.w3.org/2005/Atom}entry") + root.findall(".//entry"):
-            title = (
-                entry.findtext("{http://www.w3.org/2005/Atom}title")
-                or entry.findtext("title")
-                or ""
-            ).strip()
-            summary = (
-                entry.findtext("{http://www.w3.org/2005/Atom}summary")
-                or entry.findtext("summary")
-                or ""
-            ).strip()
-            content = (
-                entry.findtext("{http://www.w3.org/2005/Atom}content")
-                or entry.findtext("content")
-                or summary
-                or title
-            ).strip()
-            link = self._extract_atom_link(entry)
-            published = (
-                entry.findtext("{http://www.w3.org/2005/Atom}updated")
-                or entry.findtext("{http://www.w3.org/2005/Atom}published")
-                or entry.findtext("updated")
-                or entry.findtext("published")
-                or ""
-            ).strip()
-            items.append(
-                {
-                    "title": title,
-                    "summary": summary,
-                    "content": content,
-                    "url": link,
-                    "published_at": self._parse_datetime(published),
-                }
-            )
-        return items
+        return [dict(item, published_at=self._parse_datetime(item.pop("published"))) for item in parse_feed(xml_text)]
 
     def _normalize_item(self, entry: dict) -> dict:
         title = self._first_text(entry, ("title", "headline", "name", "event", "subject"))
@@ -450,21 +492,6 @@ class FetchingMixin:
                         return href.strip()
         return ""
 
-    @staticmethod
-    def _extract_atom_link(entry) -> str:
-        # Atom links are often in attributes rather than text.
-        for child in list(entry):
-            if not isinstance(child.tag, str):
-                continue
-            if child.tag.endswith("link"):
-                href = (child.attrib.get("href") or "").strip()
-                if href:
-                    return href
-                text = (child.text or "").strip()
-                if text:
-                    return text
-        return (entry.findtext("link") or "").strip()
-
     def _parse_provider_datetime(self, value: object) -> Optional[datetime]:
         if value is None or value == "":
             return None
@@ -507,14 +534,24 @@ class FetchingMixin:
             return value.isoformat()
         return value.isoformat()
 
-    def _apply_backoff(self, source: NewsSource, reason: str) -> None:
-        delay = max(60, int(source.rate_limit_seconds or 0))
-        source.backoff_until = _utc_now() + timedelta(seconds=delay)
-        self._record_source_error(source, reason)
+    def _record_source_success(self, source: NewsSource, latest: datetime) -> None:
+        source.last_fetched_at = latest
+        source.failure_count = 0
+        source.last_error = ""
+        # rate_limit_seconds is the minimum gap between fetches (quota-limited APIs).
+        source.backoff_until = (
+            _utc_now() + timedelta(seconds=source.rate_limit_seconds) if source.rate_limit_seconds >= 60 else None
+        )
+        source.save(update_fields=["last_fetched_at", "failure_count", "last_error", "backoff_until"])
 
     def _record_source_error(self, source: NewsSource, error: str) -> None:
+        # 15, 30, 60 ... minutes, capped at 6 hours: a dead feed stops costing a request every run.
         source.failure_count += 1
         source.last_error = error[:2000]
+        minutes = min(360, 15 * 2 ** min(source.failure_count - 1, 5))
+        if error == "rate_limited":
+            minutes = max(minutes, int(source.rate_limit_seconds or 0) // 60, 1)
+        source.backoff_until = _utc_now() + timedelta(minutes=minutes)
         source.save(update_fields=["failure_count", "last_error", "backoff_until"])
 
     def _clean_text(self, text: str) -> str:

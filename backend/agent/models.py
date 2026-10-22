@@ -1,48 +1,72 @@
 from __future__ import annotations
 
+import os
+from urllib.parse import urlparse
+
 from django.db import models
 
 from core.models import TimeStampedModel
 
+# Provider domain -> environment variable holding its API key. A key set on the
+# NewsSource/PriceSource row in admin wins; otherwise the env var is used, so
+# keys can live in .env instead of the database.
+PROVIDER_KEY_ENV = {
+    "finnhub.io": "FINNHUB_API_KEY",
+    "alphavantage.co": "ALPHAVANTAGE_API_KEY",
+    "newsapi.org": "NEWSAPI_API_KEY",
+    "gnews.io": "GNEWS_API_KEY",
+    "marketaux.com": "MARKETAUX_API_KEY",
+    "stlouisfed.org": "FRED_API_KEY",
+    "twelvedata.com": "TWELVEDATA_API_KEY",
+}
+
+
+def provider_key_env(url: str) -> str:
+    """Name of the env var holding the API key for this URL's provider, or ""."""
+    host = (urlparse(url or "").hostname or "").lower()
+    for domain, env_name in PROVIDER_KEY_ENV.items():
+        if host == domain or host.endswith("." + domain):
+            return env_name
+    return ""
+
+
+class ApiKeyMixin:
+    @property
+    def requires_api_key(self) -> bool:
+        return bool(self.api_key_param or self.api_key_header)
+
+    @property
+    def resolved_api_key(self) -> str:
+        env_name = provider_key_env(self.base_url)
+        return (self.api_key or "").strip() or (os.getenv(env_name, "").strip() if env_name else "")
+
 DEFAULT_ARTICLE_PROMPT = (
-    "You are the lead editor for NousNews, an institutional-grade financial intelligence platform.\n"
-    "Your role: Filter incoming news to extract ONLY economically and financially significant events\n"
-    "that directly or indirectly impact global capital markets, currencies, commodities, or asset prices.\n\n"
-    "STRICT RELEVANCE CRITERIA (reject if doesn't apply):\n"
-    "✓ ACCEPT: Central bank announcements, interest rate changes, monetary policy guidance, QE/QT actions\n"
-    "✓ ACCEPT: Economic indicators (inflation, unemployment, GDP, PMI, housing starts, retail sales, industrial production)\n"
-    "✓ ACCEPT: Corporate earnings, guidance, M&A, restructuring, major layoffs affecting sectors/markets\n"
-    "✓ ACCEPT: Financial markets: stock indices, bond yields, currency moves, commodity price spikes, crypto developments\n"
-    "✓ ACCEPT: Geopolitics with economic impact: trade wars, tariffs, sanctions, energy disruptions, supply chain events\n"
-    "✓ ACCEPT: Regulatory changes: banking regulations, SEC actions, antitrust rulings, market structure changes\n"
-    "✓ ACCEPT: Debt/credit events: sovereign debt, corporate defaults, credit rating changes, banking crises\n"
-    "✓ ACCEPT: Energy/commodities: oil/gas disruptions, rare earth supply issues, agricultural shocks\n"
-    "✗ REJECT: Sports, entertainment, celebrity news, lifestyle, weather (unless commodity/energy impact)\n"
-    "✗ REJECT: Local political events without market implications\n"
-    "✗ REJECT: Science/tech unless directly affecting major tech stocks or semiconductors\n"
-    "✗ REJECT: Social media gossip, sports transfers, awards shows\n"
-    "✗ REJECT: One-off company product launches (low market impact)\n\n"
-    "Context:\n"
+    "You are the lead markets editor at NousNews. Write one market article from the source records below for\n"
+    "readers who want to know what moved markets and why: professional investors and informed retail readers alike.\n\n"
+    "Editorial rules:\n"
+    "- Use only facts stated in the source records or the price data. Never invent numbers, quotes, or events.\n"
+    "- Cover what matters to markets: central banks and rates, economic data, earnings and deals, commodities,\n"
+    "  currencies, crypto, and geopolitics with economic impact. Skip sports, entertainment, and lifestyle stories.\n"
+    "- Explain cause and effect plainly: what happened, why it matters, and which markets it touched.\n"
+    "- When price data is given, cite the actual moves (e.g. 'gold rose 1.2% to 2,410') and tie them to the news\n"
+    "  only where the link is plausible.\n"
+    "- Neutral, precise tone. No hype, no investment advice, no predictions stated as fact.\n\n"
+    "Source records:\n"
     "{context}\n\n"
-    "Return ONLY valid JSON with this exact schema:\n"
+    "Return ONLY valid JSON with this schema:\n"
     "{\n"
-    '  "title": "Specific market-moving headline (6-12 words, include what/where/why)",\n'
-    '  "summary": "2-4 sentence executive summary: event, reason for importance, market impact (max 600 chars)",\n'
-    '  "article_text": "Narrative (3-6 sentences): what happened, why it matters economically, expected market reactions. No bullet lists.",\n'
-    '  "impacts": ["Concrete impact on asset class/currency/sector", "Secondary trade consequences"],\n'
+    '  "title": "Specific headline naming the main driver and the market it moved (8-14 words)",\n'
+    '  "summary": "2-3 sentence standfirst: the main story and its market effect (max 450 chars)",\n'
+    '  "article_text": "The article body, following the format instructions",\n'
+    '  "impacts": ["Key takeaway naming a market and a direction", "..."],\n'
     '  "importance_score": 1,\n'
-    '  "importance_reason": "Single sentence explaining expected cross-asset impact scope",\n'
-    '  "references": ["https://url1", "https://url2"]\n'
+    '  "importance_reason": "One sentence naming the market channel (rates, FX, credit, commodities, equities, crypto)",\n'
+    '  "references": ["https://a-url-from-the-source-records"]\n'
     "}\n\n"
-    "Quality requirements:\n"
-    "- Summary must be factual, under 600 chars, assume institutional audience\n"
-    "- Avoid vague language like 'significant' or 'important' without specifics\n"
-    "- article_text max 1600 chars; explain causality and market connections\n"
-    "- Impacts: max 6, each must specify affected market (e.g., 'Long-dated US Treasury yields likely to rise' not 'Markets affected')\n"
-    "- importance_score must be an integer: 1 = localized/minor, 2 = regional/sector-wide, 3 = global macro/cross-asset\n"
-    "- importance_reason max 180 chars and must name the market channel (rates, FX, credit, commodities, equities)\n"
-    "- References must be URLs extracted from context\n"
-    "- If content has low relevance to financial markets, return NULL (empty impacts list suggests rejection)\n"
+    "Field rules:\n"
+    "- impacts: 3-5 short takeaways, each naming the affected market.\n"
+    "- importance_score: integer, 1 = localized/minor, 2 = sector or regional, 3 = global cross-asset.\n"
+    "- references: only URLs that appear in the source records, most important first.\n"
 )
 
 DEFAULT_AFTERMATH_PROMPT = (
@@ -72,28 +96,18 @@ DEFAULT_AFTERMATH_PROMPT = (
 )
 
 DEFAULT_FILTER_PROMPT = (
-    "You are the NousNews relevance and impact gatekeeper.\n"
-    "Decide if a news item is materially relevant to global financial markets and assign impact importance.\n\n"
-    "Relevance standard:\n"
-    "- ACCEPT when the item can plausibly reprice rates, FX, credit, commodities, equities, or broad risk sentiment.\n"
-    "- REJECT if primarily sports, entertainment, celebrity, lifestyle, or local politics without economic transmission.\n"
-    "- Prefer caution: if uncertain, accept only when concrete market transmission is explicit.\n\n"
-    "Importance scale:\n"
-    "- 1 = localized/minor, limited to a single issuer or niche market\n"
-    "- 2 = regional/sector level, meaningful but not global regime-shifting\n"
-    "- 3 = global/cross-asset catalyst, likely to influence multiple major markets\n\n"
-    "Input:\n"
-    "Title: {title}\n"
-    "Summary: {summary}\n"
-    "Content: {content}\n"
-    "Heuristic score: {heuristic_score}\n\n"
-    "Return ONLY JSON:\n"
-    "{\n"
-    '  "decision": "accept|reject",\n'
-    '  "importance_score": 1,\n'
-    '  "confidence": 0.0,\n'
-    '  "reason": "One sentence explaining market relevance decision"\n'
-    "}\n"
+    "You are the NousNews relevance gatekeeper. For each numbered news item, decide whether it is materially\n"
+    "relevant to financial markets (rates, FX, credit, commodities, equities, crypto, or broad risk sentiment)\n"
+    "and rate its importance.\n\n"
+    "- accept: plausible market transmission: central banks, economic data, earnings, deals, commodities,\n"
+    "  currencies, crypto, trade, sanctions, regulation, defaults, geopolitics with economic impact.\n"
+    "- reject: sports, entertainment, celebrity, lifestyle, local politics without economic impact,\n"
+    "  product reviews, promotional or how-to content.\n"
+    "- When unsure, accept only if the market link is explicit.\n\n"
+    "Items:\n"
+    "{items}\n\n"
+    "Return ONLY JSON with one entry per item:\n"
+    '{"decisions": [{"id": 1, "decision": "accept"}, {"id": 2, "decision": "reject"}]}\n'
 )
 
 
@@ -106,9 +120,9 @@ class AgentConfig(TimeStampedModel):
     # Authorization header scheme: "Bearer" for OpenAI-compatible APIs,
     # e.g. "apikey" for ArvanCloud AI.
     llm_auth_scheme = models.CharField(max_length=32, default="Bearer")
-    llm_daily_request_budget = models.PositiveIntegerField(default=200)
+    llm_daily_request_budget = models.PositiveIntegerField(default=400)
     llm_temperature = models.FloatField(default=0.1)
-    llm_max_output_tokens = models.PositiveIntegerField(default=1400)
+    llm_max_output_tokens = models.PositiveIntegerField(default=4000)
     max_context_chars = models.PositiveIntegerField(default=12000)
 
     loop_interval_minutes = models.FloatField(null=True, blank=True)
@@ -285,7 +299,7 @@ class AgentLogEvent(TimeStampedModel):
         return f"{self.step} ({self.level})"
 
 
-class NewsSource(TimeStampedModel):
+class NewsSource(ApiKeyMixin, TimeStampedModel):
     SOURCE_API = "api"
     SOURCE_RSS = "rss"
 
@@ -327,7 +341,7 @@ class NewsSource(TimeStampedModel):
         return f"{self.name} ({self.source_type})"
 
 
-class PriceSource(TimeStampedModel):
+class PriceSource(ApiKeyMixin, TimeStampedModel):
     SOURCE_API = "api"
     SOURCE_RSS = "rss"
     SOURCE_EXTERNAL = "external"

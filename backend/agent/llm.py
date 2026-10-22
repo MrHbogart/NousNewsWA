@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +10,9 @@ import httpx
 from django.conf import settings
 
 from agent.models import AgentConfig
+
+
+RETRY_DELAY_SECONDS = 3
 
 
 @dataclass(frozen=True)
@@ -24,8 +29,11 @@ class ArticleResult:
 class LLMClient:
     def __init__(self, config: AgentConfig):
         self._config = config
-        self._api_key = config.llm_api_key or ""
-        self._base_url = self._normalize_base_url(config.llm_base_url or "https://api.openai.com/v1")
+        # The admin-set value wins; LLM_API_KEY / LLM_BASE_URL let the secret live in .env instead.
+        self._api_key = (config.llm_api_key or "").strip() or os.getenv("LLM_API_KEY", "").strip()
+        self._base_url = self._normalize_base_url(
+            config.llm_base_url or os.getenv("LLM_BASE_URL", "") or "https://api.openai.com/v1"
+        )
         self.last_output_text = ""
         self.last_error = ""
         self.last_status_code: Optional[int] = None
@@ -92,20 +100,35 @@ class LLMClient:
             "Content-Type": "application/json",
             "Authorization": self._auth_header(),
         }
-        try:
-            with httpx.Client(timeout=getattr(settings, "AGENT_LLM_TIMEOUT_SECONDS", 45)) as client:
-                resp = client.post(
-                    f"{self._base_url}/chat/completions",
-                    headers=headers,
-                    json=payload,
-                )
+        data = None
+        # One retry for rate limits, provider hiccups and timeouts; a 4xx like a
+        # bad model id fails at once with the provider's message in last_error.
+        for attempt in range(2):
+            if attempt:
+                time.sleep(RETRY_DELAY_SECONDS)
+            try:
+                with httpx.Client(timeout=getattr(settings, "AGENT_LLM_TIMEOUT_SECONDS", 45)) as client:
+                    resp = client.post(
+                        f"{self._base_url}/chat/completions",
+                        headers=headers,
+                        json=payload,
+                    )
+            except httpx.HTTPError as exc:
+                self.last_error = f"request_failed: {type(exc).__name__}"
+                continue
             self.last_status_code = resp.status_code
             if resp.status_code >= 400:
-                self.last_error = f"http_{resp.status_code}"
+                self.last_error = f"http_{resp.status_code}: {resp.text[:300]}"
+                if resp.status_code == 429 or resp.status_code >= 500:
+                    continue
                 return None
-            data = resp.json()
-        except Exception:
-            self.last_error = "request_failed"
+            try:
+                data = resp.json()
+            except ValueError:
+                self.last_error = "invalid_json_response"
+                return None
+            break
+        if not isinstance(data, dict):
             return None
         usage = data.get("usage") or {}
         self.prompt_tokens += int(usage.get("prompt_tokens") or 0)

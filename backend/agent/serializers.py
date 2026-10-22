@@ -1,3 +1,5 @@
+import os
+
 from rest_framework import serializers
 
 from agent.models import AgentConfig, AgentLogEvent
@@ -51,7 +53,7 @@ class AgentConfigSerializer(serializers.ModelSerializer):
         return bool((getattr(obj, "control_password_hash", "") or "").strip())
 
     def get_llm_api_key_set(self, obj) -> bool:
-        return bool((getattr(obj, "llm_api_key", "") or "").strip())
+        return bool((getattr(obj, "llm_api_key", "") or "").strip() or os.getenv("LLM_API_KEY", "").strip())
 
 
 class AgentLogEventSerializer(serializers.ModelSerializer):

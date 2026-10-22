@@ -12,7 +12,20 @@ from .models import (
     NewsSource,
     PriceSource,
 )
+from .llm import LLMClient
+from .models import provider_key_env
 from .services import request_start
+
+
+def _api_key_status(source) -> str:
+    if (source.api_key or "").strip():
+        return "set"
+    env_name = provider_key_env(source.base_url)
+    if env_name and source.resolved_api_key:
+        return f"from {env_name}"
+    if not source.requires_api_key:
+        return "not needed"
+    return f"missing (set {env_name})" if env_name else "missing"
 
 
 class AgentConfigAdminForm(forms.ModelForm):
@@ -65,7 +78,7 @@ class AgentConfigAdmin(admin.ModelAdmin):
         "control_password_status",
     )
     readonly_fields = ("control_password_status",)
-    actions = ["start_run_forever_loop"]
+    actions = ["start_run_forever_loop", "test_llm_connection"]
     change_form_template = "admin/agent/agentconfig/change_form.html"
 
     fieldsets = (
@@ -141,6 +154,20 @@ class AgentConfigAdmin(admin.ModelAdmin):
 
     start_run_forever_loop.short_description = "Start run_forever loop"
 
+    @admin.action(description="Test LLM connection")
+    def test_llm_connection(self, request, queryset):
+        config = queryset.first()
+        llm = LLMClient(config)
+        if not llm.enabled:
+            self.message_user(
+                request, "LLM is disabled or has no API key (set it here or LLM_API_KEY in .env).", level=messages.WARNING
+            )
+            return
+        if llm.generate_json('Reply with the JSON object {"ok": true}.') is not None:
+            self.message_user(request, f"LLM OK: {config.llm_model} answered.", level=messages.SUCCESS)
+        else:
+            self.message_user(request, f"LLM call failed: {llm.last_error}", level=messages.ERROR)
+
     def response_change(self, request, obj):
         if "_start_run_forever" in request.POST:
             request_start()
@@ -213,7 +240,7 @@ class NewsSourceAdmin(admin.ModelAdmin):
 
     @admin.display(description="API key")
     def api_key_set(self, obj):
-        return "set" if (obj.api_key or "").strip() else "not set"
+        return _api_key_status(obj)
 
 
 @admin.register(PriceSource)
@@ -253,7 +280,7 @@ class PriceSourceAdmin(admin.ModelAdmin):
 
     @admin.display(description="API key")
     def api_key_set(self, obj):
-        return "set" if (obj.api_key or "").strip() else "not set"
+        return _api_key_status(obj)
 
 
 @admin.register(MemoryState)
