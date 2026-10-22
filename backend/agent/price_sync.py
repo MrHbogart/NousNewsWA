@@ -55,6 +55,11 @@ FRESH_SERIES_HISTORY = timedelta(days=1)
 warnings.filterwarnings("ignore", module=r"yfinance(\.|$)")
 
 _ccxt_paused_until = 0.0
+# Last successful yfinance download and the symbols it covered (a symbol new
+# to the set, e.g. a crypto fallback, still gets its own backfill).
+_yf_synced_at: datetime | None = None
+_yf_covered: set[str] = set()
+YF_OVERLAP = timedelta(minutes=10)
 
 
 def sync_price_feeds(*, user_agent: str | None = None) -> PriceFeedStats:
@@ -139,13 +144,21 @@ def _sync_from_yfinance(stats: PriceFeedStats, now: datetime, extra: dict[str, s
     last_at = {symbol: _last_bar_at(series) for symbol, series in series_by_symbol.items()}
     # One request for every ticker, starting at the oldest gap: an idle minute
     # refetches a couple of bars, a restart refills what was missed.
+    global _yf_synced_at
     start = min((ts or now - FRESH_SERIES_HISTORY) for ts in last_at.values())
+    # A closed market's last bar stays put (weekends); once a sync has covered
+    # it, later ones start from that sync instead of re-downloading days of bars.
+    if _yf_synced_at is not None and set(targets) <= _yf_covered:
+        start = max(start, _yf_synced_at - YF_OVERLAP)
     start = max(start, now - BACKFILL_MAX) - timedelta(minutes=1)
     tickers = sorted(set(targets.values()))
     data = yf.download(
         tickers, start=start, interval="1m", group_by="ticker", progress=False, threads=False, auto_adjust=False
     )
     stats.api_feeds_checked += len(targets)
+    _yf_synced_at = now
+    _yf_covered.clear()
+    _yf_covered.update(targets)
     served = set()
     for symbol, ticker in targets.items():
         series = series_by_symbol.get(symbol)

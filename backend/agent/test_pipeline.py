@@ -552,6 +552,25 @@ class ArticleCompositionTests(TestCase):
 class PriceProviderTests(TestCase):
     def setUp(self):
         price_sync._ccxt_paused_until = 0.0
+        price_sync._yf_synced_at = None
+        price_sync._yf_covered.clear()
+
+    def test_closed_market_history_is_not_refetched_every_sync(self):
+        import pandas as pd
+
+        from articles.models import AssetCandle, AssetSeries
+
+        spx = AssetSeries.objects.create(symbol="^GSPC")
+        now = timezone.now()
+        friday_close = now - timedelta(days=2)
+        AssetCandle.objects.create(series=spx, timestamp=friday_close, open=1, high=1, low=1, close=1)
+        fake_yf = mock.Mock(download=mock.Mock(return_value=pd.DataFrame()))
+        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}):
+            price_sync._sync_from_yfinance(price_sync.PriceFeedStats(), now)
+            price_sync._sync_from_yfinance(price_sync.PriceFeedStats(), now + timedelta(seconds=15))
+        first, second = (c.kwargs["start"] for c in fake_yf.download.call_args_list)
+        self.assertLess(first, friday_close)
+        self.assertGreater(second, now - timedelta(minutes=15))
 
     def test_yfinance_writes_new_bars_in_one_batch_request(self):
         import pandas as pd
@@ -599,6 +618,38 @@ class PriceProviderTests(TestCase):
             self.assertEqual(finnhub.resolved_api_key, "secret")
         self.assertTrue(finnhub.enabled)
         self.assertFalse(NewsSource.objects.get(base_url="https://newsapi.org/v2/everything").enabled)
+
+
+class FetchSafetyTests(TestCase):
+    def test_full_text_fetch_only_targets_public_hosts(self):
+        from agent.services.fetching import is_public_http_url
+
+        with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("10.0.0.5", 80))]):
+            self.assertFalse(is_public_http_url("http://db.internal/x"))
+        with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443))]):
+            self.assertTrue(is_public_http_url("https://news.example/a"))
+        self.assertFalse(is_public_http_url("file:///etc/passwd"))
+
+    def test_llm_rejected_item_is_not_reviewed_again(self):
+        from agent.models import NewsSource
+        from agent.services import fetching
+        from agent.services.base import SourceFetchResult
+
+        config = AgentConfig.objects.create(llm_api_key="k", use_llm_summaries=False)
+        source = NewsSource.objects.create(name="W", base_url="https://w.example/rss", source_type="rss")
+        item = {"title": "Fed raises interest rates", "summary": RELEVANT_TEXT, "content": RELEVANT_TEXT,
+                "url": "https://w.example/rejected-once", "published_at": timezone.now() - timedelta(minutes=5)}
+        service = AgentService(config=config)
+        reply = {"decisions": [{"id": 1, "decision": "reject"}]}
+        try:
+            with mock.patch.object(service, "_fetch_source_batch", return_value=SourceFetchResult(source.id, [item], 1)), \
+                 mock.patch.object(service.llm, "generate_json", return_value=reply) as llm:
+                service._fetch_and_store_sources(AgentRun.objects.create())
+                service._fetch_and_store_sources(AgentRun.objects.create())
+        finally:
+            service.close()
+            fetching._llm_rejected_urls.clear()
+        self.assertEqual(llm.call_count, 1)
 
 
 class WorkerLockTests(TestCase):

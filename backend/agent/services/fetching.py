@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
+import ipaddress
 import re
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 from urllib.parse import urlparse
@@ -24,6 +27,40 @@ FULLTEXT_MAX_CHARS = 6000
 # Pages that never yield article text (JS redirects).
 FULLTEXT_SKIP_HOSTS = {"news.google.com"}
 FULLTEXT_SKIP_EXTENSIONS = (".pdf", ".xls", ".xlsx", ".csv", ".zip", ".doc", ".docx", ".mp4", ".mp3")
+
+
+# URLs the LLM filter rejected, so a feed that keeps listing an item for a
+# day doesn't get it re-reviewed (and re-billed) every run. Per worker process.
+_LLM_REJECTED_MAX = 20000
+_llm_rejected_urls: OrderedDict[str, None] = OrderedDict()
+
+
+def _remember_rejected(url: str) -> None:
+    _llm_rejected_urls[url] = None
+    while len(_llm_rejected_urls) > _LLM_REJECTED_MAX:
+        _llm_rejected_urls.popitem(last=False)
+
+
+def is_public_http_url(url: str) -> bool:
+    """http(s) URL whose host resolves only to public addresses."""
+    parsed = urlparse(url or "")
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        return False
+    try:
+        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+    except OSError:
+        return False
+    return all(_is_public_address(info[4][0]) for info in infos)
+
+
+# Fake-IP DNS proxies (Clash and similar) answer every name from the benchmark
+# range; it's never an internal service, so it counts as public here.
+_FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+
+
+def _is_public_address(address: str) -> bool:
+    ip = ipaddress.ip_address(address.split("%", 1)[0])
+    return ip.is_global or ip in _FAKE_IP_NETWORK
 
 
 def _local(tag: object) -> str:
@@ -211,7 +248,7 @@ class FetchingMixin:
                     counts["items_seen"] += 1
                     stats.items_seen += 1
                     url = (item.get("url") or "").strip()
-                    if url in stored_urls:
+                    if url in stored_urls or url in _llm_rejected_urls:
                         counts["items_already_stored"] += 1
                         continue
 
@@ -267,6 +304,8 @@ class FetchingMixin:
             if verdict is False:
                 counts["items_rejected"] += 1
                 counts["items_rejected_llm"] += 1
+                if candidate["url"]:
+                    _remember_rejected(candidate["url"])
             elif verdict or candidate["score"] >= self._MIN_RELEVANCE_SCORE:
                 accepted.append(candidate)
             else:
@@ -335,9 +374,23 @@ class FetchingMixin:
         return enriched
 
     def _fetch_article_text(self, url: str) -> str:
-        client = self._build_http_client()
+        # Feed links are third-party input: follow redirects by hand so every
+        # hop is checked to be a public address (no internal services).
+        client = httpx.Client(
+            timeout=getattr(settings, "AGENT_FETCH_TIMEOUT_SECONDS", 20),
+            headers={"User-Agent": self.config.user_agent},
+            follow_redirects=False,
+        )
         try:
-            resp = client.get(url)
+            for _ in range(4):
+                if not is_public_http_url(url):
+                    return ""
+                resp = client.get(url)
+                if not resp.is_redirect:
+                    break
+                url = str(resp.next_request.url) if resp.next_request else ""
+            else:
+                return ""
             if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", ""):
                 return ""
             return extract_article_text(resp.text)
@@ -376,7 +429,6 @@ class FetchingMixin:
 
         data = resp.json()
         items = self._parse_api_items(data)
-        items = self._filter_items_since(items, source.last_fetched_at)
         return items[: int(self.config.max_items_per_source)]
 
     def _fetch_rss_source(self, source: NewsSource, *, client: Optional[httpx.Client] = None) -> list[dict]:
@@ -387,7 +439,6 @@ class FetchingMixin:
         if resp.status_code >= 400:
             raise RuntimeError(f"http_{resp.status_code}")
         items = self._parse_rss_items(resp.text)
-        items = self._filter_items_since(items, source.last_fetched_at)
         return items[: int(self.config.max_items_per_source)]
 
     def _parse_api_items(self, data: object) -> list[dict]:
@@ -516,16 +567,6 @@ class FetchingMixin:
                 return None
 
         return self._parse_datetime(text)
-
-    def _filter_items_since(self, items: list[dict], last_fetched_at: Optional[datetime]) -> list[dict]:
-        if not last_fetched_at:
-            return items
-        filtered = []
-        for item in items:
-            published_at = item.get("published_at")
-            if published_at is None or published_at >= last_fetched_at:
-                filtered.append(item)
-        return filtered
 
     def _format_since(self, value: datetime, fmt: str) -> str:
         if fmt == "unix":
