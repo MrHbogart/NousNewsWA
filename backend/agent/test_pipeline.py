@@ -633,13 +633,22 @@ class FetchSafetyTests(TestCase):
              mock.patch("agent.services.fetching._ALLOW_FAKE_IP", False):
             self.assertFalse(is_public_http_url("https://news.example/a"))  # fake-IP range: opt-in only
 
-    def test_full_text_fetch_rejects_a_rebound_peer(self):
-        from agent.services import fetching
+    def test_full_text_fetch_connects_to_the_checked_address(self):
+        from agent.services.fetching import resolve_public_url
 
-        resp = mock.Mock(extensions={"network_stream": mock.Mock(get_extra_info=mock.Mock(return_value=("10.0.0.5", 80)))})
-        self.assertFalse(fetching._peer_is_public(resp))
-        resp.extensions["network_stream"].get_extra_info.return_value = ("93.184.216.34", 443)
-        self.assertTrue(fetching._peer_is_public(resp))
+        with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443))]):
+            self.assertEqual(
+                resolve_public_url("https://news.example/a?b=1"),
+                ("https://93.184.216.34/a?b=1", "news.example", "news.example"),
+            )
+        with mock.patch("socket.getaddrinfo", return_value=[(10, 1, 6, "", ("2606:2800::1", 8080, 0, 0))]):
+            self.assertEqual(
+                resolve_public_url("http://news.example:8080/a"),
+                ("http://[2606:2800::1]:8080/a", "news.example:8080", "news.example"),
+            )
+        # One internal answer among public ones rejects the name.
+        with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443)), (2, 1, 6, "", ("127.0.0.1", 443))]):
+            self.assertIsNone(resolve_public_url("https://news.example/a"))
 
     def test_llm_rejected_item_is_not_reviewed_again(self):
         from agent.models import NewsSource

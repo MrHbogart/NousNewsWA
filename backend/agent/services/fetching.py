@@ -43,16 +43,34 @@ def _remember_rejected(url: str) -> None:
         _llm_rejected_urls.popitem(last=False)
 
 
-def is_public_http_url(url: str) -> bool:
-    """http(s) URL whose host resolves only to public addresses."""
+def resolve_public_url(url: str) -> tuple[str, str, str] | None:
+    """(URL with the host replaced by its checked IP, Host header, hostname), or None.
+
+    None unless the URL is http(s) and every address the name resolves to is public.
+    """
     parsed = urlparse(url or "")
     if parsed.scheme not in ("http", "https") or not parsed.hostname:
-        return False
+        return None
+    default_port = 443 if parsed.scheme == "https" else 80
     try:
-        infos = socket.getaddrinfo(parsed.hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
-    except OSError:
-        return False
-    return all(_is_public_address(info[4][0]) for info in infos)
+        port = parsed.port or default_port
+        infos = socket.getaddrinfo(parsed.hostname, port, type=socket.SOCK_STREAM)
+    except (OSError, ValueError):
+        return None
+    addresses = [info[4][0] for info in infos]
+    if not addresses or not all(_is_public_address(a) for a in addresses):
+        return None
+    ip = addresses[0].split("%", 1)[0]
+    netloc = f"[{ip}]" if ":" in ip else ip
+    if parsed.port:
+        netloc += f":{parsed.port}"
+    host_header = parsed.hostname + (f":{parsed.port}" if parsed.port and parsed.port != default_port else "")
+    return parsed._replace(netloc=netloc).geturl(), host_header, parsed.hostname
+
+
+def is_public_http_url(url: str) -> bool:
+    """http(s) URL whose host resolves only to public addresses."""
+    return resolve_public_url(url) is not None
 
 
 # Fake-IP DNS proxies (Clash and similar) answer every name from the benchmark
@@ -66,11 +84,6 @@ def _is_public_address(address: str) -> bool:
     ip = ipaddress.ip_address(address.split("%", 1)[0])
     return ip.is_global or (_ALLOW_FAKE_IP and ip in _FAKE_IP_NETWORK)
 
-
-def _peer_is_public(resp: httpx.Response) -> bool:
-    stream = resp.extensions.get("network_stream")
-    peer = stream.get_extra_info("server_addr") if stream is not None else None
-    return bool(peer) and _is_public_address(str(peer[0]))
 
 
 def _local(tag: object) -> str:
@@ -393,20 +406,30 @@ class FetchingMixin:
         )
         try:
             for _ in range(4):
-                if not is_public_http_url(url):
+                # Connect to the address that was checked (no second DNS lookup
+                # to rebind); Host and TLS SNI keep the real name, so the
+                # certificate is still verified against it.
+                pinned = resolve_public_url(url)
+                if pinned is None:
                     return ""
-                with client.stream("GET", url) as resp:
-                    # The name is resolved again on connect (DNS rebinding):
-                    # check the address actually connected to before reading.
-                    if not _peer_is_public(resp):
-                        return ""
+                pinned_url, host_header, hostname = pinned
+                with client.stream(
+                    "GET", pinned_url, headers={"Host": host_header}, extensions={"sni_hostname": hostname}
+                ) as resp:
                     if resp.is_redirect:
-                        url = str(resp.next_request.url) if resp.next_request else ""
+                        location = resp.headers.get("location", "")
+                        url = str(httpx.URL(url).join(location)) if location else ""
                         continue
                     if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", ""):
                         return ""
-                    body = b"".join(resp.iter_bytes())[:FULLTEXT_MAX_BYTES]
-                    return extract_article_text(body.decode(resp.encoding or "utf-8", errors="replace"))
+                    if int(resp.headers.get("content-length") or 0) > FULLTEXT_MAX_BYTES:
+                        return ""
+                    body = bytearray()
+                    for chunk in resp.iter_bytes():
+                        body += chunk
+                        if len(body) >= FULLTEXT_MAX_BYTES:
+                            break
+                    return extract_article_text(bytes(body).decode(resp.encoding or "utf-8", errors="replace"))
             return ""
         except Exception:
             return ""
