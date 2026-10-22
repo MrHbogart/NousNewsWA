@@ -629,6 +629,17 @@ class FetchSafetyTests(TestCase):
         with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("93.184.216.34", 443))]):
             self.assertTrue(is_public_http_url("https://news.example/a"))
         self.assertFalse(is_public_http_url("file:///etc/passwd"))
+        with mock.patch("socket.getaddrinfo", return_value=[(2, 1, 6, "", ("198.18.0.7", 443))]), \
+             mock.patch("agent.services.fetching._ALLOW_FAKE_IP", False):
+            self.assertFalse(is_public_http_url("https://news.example/a"))  # fake-IP range: opt-in only
+
+    def test_full_text_fetch_rejects_a_rebound_peer(self):
+        from agent.services import fetching
+
+        resp = mock.Mock(extensions={"network_stream": mock.Mock(get_extra_info=mock.Mock(return_value=("10.0.0.5", 80)))})
+        self.assertFalse(fetching._peer_is_public(resp))
+        resp.extensions["network_stream"].get_extra_info.return_value = ("93.184.216.34", 443)
+        self.assertTrue(fetching._peer_is_public(resp))
 
     def test_llm_rejected_item_is_not_reviewed_again(self):
         from agent.models import NewsSource

@@ -4,6 +4,7 @@ from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import hashlib
 import ipaddress
+import os
 import re
 import socket
 from datetime import datetime, timedelta, timezone
@@ -24,6 +25,7 @@ from .base import SourceFetchResult, SourceSyncStats, _utc_now
 
 FULLTEXT_MIN_CHARS = 500
 FULLTEXT_MAX_CHARS = 6000
+FULLTEXT_MAX_BYTES = 3_000_000
 # Pages that never yield article text (JS redirects).
 FULLTEXT_SKIP_HOSTS = {"news.google.com"}
 FULLTEXT_SKIP_EXTENSIONS = (".pdf", ".xls", ".xlsx", ".csv", ".zip", ".doc", ".docx", ".mp4", ".mp3")
@@ -54,13 +56,21 @@ def is_public_http_url(url: str) -> bool:
 
 
 # Fake-IP DNS proxies (Clash and similar) answer every name from the benchmark
-# range; it's never an internal service, so it counts as public here.
+# range. Opt in with AGENT_FETCH_ALLOW_FAKE_IP=true only on such a host; then
+# the proxy, not this check, decides what is reachable.
 _FAKE_IP_NETWORK = ipaddress.ip_network("198.18.0.0/15")
+_ALLOW_FAKE_IP = os.getenv("AGENT_FETCH_ALLOW_FAKE_IP", "false").strip().lower() == "true"
 
 
 def _is_public_address(address: str) -> bool:
     ip = ipaddress.ip_address(address.split("%", 1)[0])
-    return ip.is_global or ip in _FAKE_IP_NETWORK
+    return ip.is_global or (_ALLOW_FAKE_IP and ip in _FAKE_IP_NETWORK)
+
+
+def _peer_is_public(resp: httpx.Response) -> bool:
+    stream = resp.extensions.get("network_stream")
+    peer = stream.get_extra_info("server_addr") if stream is not None else None
+    return bool(peer) and _is_public_address(str(peer[0]))
 
 
 def _local(tag: object) -> str:
@@ -385,15 +395,19 @@ class FetchingMixin:
             for _ in range(4):
                 if not is_public_http_url(url):
                     return ""
-                resp = client.get(url)
-                if not resp.is_redirect:
-                    break
-                url = str(resp.next_request.url) if resp.next_request else ""
-            else:
-                return ""
-            if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", ""):
-                return ""
-            return extract_article_text(resp.text)
+                with client.stream("GET", url) as resp:
+                    # The name is resolved again on connect (DNS rebinding):
+                    # check the address actually connected to before reading.
+                    if not _peer_is_public(resp):
+                        return ""
+                    if resp.is_redirect:
+                        url = str(resp.next_request.url) if resp.next_request else ""
+                        continue
+                    if resp.status_code >= 400 or "html" not in resp.headers.get("content-type", ""):
+                        return ""
+                    body = b"".join(resp.iter_bytes())[:FULLTEXT_MAX_BYTES]
+                    return extract_article_text(body.decode(resp.encoding or "utf-8", errors="replace"))
+            return ""
         except Exception:
             return ""
         finally:
