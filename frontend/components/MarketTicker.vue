@@ -6,7 +6,7 @@
         :key="row.symbol"
         class="ticker-item"
         :class="{ 'is-stale': row.is_stale }"
-        :title="row.is_stale ? `Market closed. Last price at ${lastAt(row)} UTC` : `24h range ${formatPrice(row.low)} – ${formatPrice(row.high)}`"
+        :title="row.is_stale ? `Market closed. Last price at ${lastAt(row)} UTC` : `24h range ${formatPrice(row.low)} to ${formatPrice(row.high)}`"
       >
         <span class="ticker-label">{{ shortLabel(row.label) }}</span>
         <span class="ticker-price">{{ formatPrice(row.last) }}</span>
@@ -53,8 +53,8 @@ function sparkPoints(values) {
 
 <style scoped>
 .ticker {
-  border-bottom: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.6);
+  border-bottom: var(--rule-hair) solid var(--color-ink);
+  background: var(--color-paper-2);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -66,59 +66,60 @@ function sparkPoints(values) {
 .ticker-track {
   display: flex;
   width: max-content;
-  margin: 0 auto;
-  padding: 0 14px;
+  margin-inline: auto;
+  padding-inline: var(--space-xs);
 }
 
 .ticker-item {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 9px 12px;
-  font-size: 12.5px;
+  gap: var(--space-xs);
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-  border-right: 1px solid var(--line);
+  border-right: var(--rule-hair) solid var(--color-rule);
 }
 
 .ticker-item:last-child {
   border-right: 0;
 }
 
-.ticker-item.is-stale {
-  opacity: 0.6;
+.ticker-item.is-stale .ticker-price,
+.ticker-item.is-stale .ticker-change {
+  color: var(--color-muted);
 }
 
 .ticker-label {
-  color: var(--ink-soft);
+  color: var(--color-muted);
 }
 
 .ticker-price {
   font-weight: 600;
-  color: var(--ink);
+  color: var(--color-ink);
 }
 
 .ticker-change.is-up,
 .ticker-spark .is-up {
-  color: var(--up);
-  stroke: var(--up);
+  color: var(--color-up);
+  stroke: var(--color-up);
 }
 
 .ticker-change.is-down,
 .ticker-spark .is-down {
-  color: var(--down);
-  stroke: var(--down);
+  color: var(--color-down);
+  stroke: var(--color-down);
 }
 
 .ticker-change.is-flat,
 .ticker-spark .is-flat {
-  color: var(--ink-soft);
-  stroke: var(--ink-soft);
+  color: var(--color-muted);
+  stroke: var(--color-muted);
 }
 
 .ticker-spark {
-  width: 48px;
-  height: 16px;
+  width: var(--space-2xl);
+  height: var(--space-md);
 }
 
 .ticker-spark polyline {

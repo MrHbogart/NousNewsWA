@@ -18,13 +18,13 @@
     <h2>Advertising and cookies</h2>
     <p>
       We may show ads served by Google and its partners. Third-party vendors, including Google, use cookies to
-      serve ads based on your previous visits to this and other websites. Google's advertising cookies let it
+      serve ads based on your previous visits to this and other websites. Google’s advertising cookies let it
       and its partners serve ads to you based on your visits to this site and/or other sites on the internet.
     </p>
     <p>
       You can opt out of personalized advertising in
       <a href="https://adssettings.google.com" rel="noopener" target="_blank">Google Ads Settings</a>, or opt out
-      of many third-party vendors' cookies at
+      of many third-party vendors’ cookies at
       <a href="https://www.aboutads.info/choices/" rel="noopener" target="_blank">aboutads.info</a>. Learn more
       in <a href="https://policies.google.com/technologies/partner-sites" rel="noopener" target="_blank">how
       Google uses information from sites that use its services</a>.
@@ -41,7 +41,7 @@
     </p>
 
     <h2>Changes</h2>
-    <p>If this policy changes, we'll update this page and the date above.</p>
+    <p>If this policy changes, we’ll update this page and the date above.</p>
   </article>
 </template>
 

@@ -1,24 +1,22 @@
 <template>
-  <article class="daily">
-    <div class="daily-divider">
-      <span class="daily-line"></span>
-      <span class="daily-date">{{ dividerLabel }}</span>
-      <span class="daily-line"></span>
-    </div>
-    <div class="daily-content">
-      <p class="daily-badge">{{ badge }}</p>
-      <h2 class="daily-title">
-        <NuxtLink :to="`/articles/${card.slug || card.id}`">{{ card.title || 'Market summary' }}</NuxtLink>
-      </h2>
-      <div class="daily-meta">
+  <div class="daily">
+    <p class="daily-dateline"><time :datetime="card.period_start">{{ dividerLabel }}</time></p>
+    <article class="story daily-story">
+      <div class="story-facts">
+        <span class="daily-kind">{{ badge }}</span>
         <time :datetime="card.period_start">{{ dateRange }}</time>
         <ImportanceMarker :score="card.importance_score" />
       </div>
-      <p class="daily-summary">{{ card.summary }}</p>
-      <NuxtLink :to="`/articles/${card.slug || card.id}`" class="daily-readmore">Read the full {{ noun }}</NuxtLink>
-      <PriceChart class="daily-chart" :series="card.price_series || []" />
-    </div>
-  </article>
+      <div class="story-body">
+        <h2 class="story-title daily-title">
+          <NuxtLink :to="`/articles/${card.slug || card.id}`">{{ card.title || 'Market summary' }}</NuxtLink>
+        </h2>
+        <p class="story-summary daily-summary">{{ card.summary }}</p>
+        <NuxtLink :to="`/articles/${card.slug || card.id}`" class="text-link story-more">Read the full {{ noun }}</NuxtLink>
+        <PriceChart class="story-chart" :series="card.price_series || []" />
+      </div>
+    </article>
+  </div>
 </template>
 
 <script setup>
@@ -46,113 +44,42 @@ const dateRange = computed(() => {
   const short = { month: 'short', day: 'numeric' }
   // period_end is exclusive (next midnight): a day brief covers just its start date.
   if (props.card.timeframe === 'day') return `${fmt(start, { ...short, year: 'numeric' })} (UTC)`
-  return `${fmt(start, short)} – ${fmt(new Date(end.getTime() - 1), { ...short, year: 'numeric' })} (UTC)`
+  return `${fmt(start, short)} to ${fmt(new Date(end.getTime() - 1), { ...short, year: 'numeric' })} (UTC)`
 })
 </script>
 
 <style scoped>
 .daily {
-  margin-bottom: 20px;
+  margin-top: var(--space-2xl);
 }
 
-.daily-divider {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin: 28px 0 16px;
+.daily-dateline {
+  padding-top: var(--space-sm);
+  border-top: var(--rule-bar) solid var(--color-ink);
+  font-family: var(--font-display);
+  font-size: var(--text-display-s);
+  line-height: 1;
+  letter-spacing: var(--tracking-display);
+  text-transform: uppercase;
+  overflow-wrap: break-word;
 }
 
-.daily-line {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(to right, transparent, var(--line), transparent);
+.daily-story {
+  border-top: 0;
 }
 
-.daily-date {
-  font-size: 13px;
-  color: var(--ink-soft);
-  white-space: nowrap;
-}
-
-.daily-content {
-  background: var(--glass);
-  border: 1px solid var(--line);
-  border-left: 3px solid var(--accent);
-  border-radius: var(--radius);
-  padding: 24px;
-  box-shadow: var(--shadow-soft);
-}
-
-.daily-badge {
-  margin: 0 0 8px;
-  font-size: 12.5px;
+.daily-kind {
   font-weight: 600;
-  color: var(--accent);
+  color: var(--color-ink);
 }
 
 .daily-title {
-  margin: 0;
-  font-size: 23px;
-  line-height: 1.3;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.daily-title a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.daily-title a:hover {
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
-}
-
-.daily-meta {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: var(--ink-soft);
+  font-size: var(--text-2xl);
 }
 
 .daily-summary {
-  margin: 14px 0 0;
-  font-size: 16px;
-  line-height: 1.72;
-  color: var(--ink-soft);
-}
-
-.daily-readmore {
-  display: inline-block;
-  margin-top: 10px;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.daily-readmore:hover {
-  text-decoration: underline;
-}
-
-.daily-chart {
-  margin-top: 18px;
-}
-
-@media (max-width: 640px) {
-  .daily-content {
-    padding: 16px;
-  }
-
-  .daily-title {
-    font-size: 20px;
-  }
-
-  .daily-summary {
-    font-size: 15px;
-  }
+  -webkit-line-clamp: none;
+  font-size: var(--text-lg);
+  color: var(--color-ink);
 }
 </style>

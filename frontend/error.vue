@@ -3,9 +3,9 @@
     <section class="prose-page">
       <h1>{{ notFound ? 'Page not found' : 'Something went wrong' }}</h1>
       <p>
-        {{ notFound ? "This page doesn't exist or has moved." : 'This page is temporarily unavailable. Please try again shortly.' }}
+        {{ notFound ? "This page doesn’t exist or has moved." : 'This page is temporarily unavailable. Please try again shortly.' }}
       </p>
-      <p><a href="/" @click.prevent="clearError({ redirect: '/' })">Back to today's market briefs</a></p>
+      <p><a href="/" @click.prevent="clearError({ redirect: '/' })">Back to today’s market briefs</a></p>
     </section>
   </NuxtLayout>
 </template>

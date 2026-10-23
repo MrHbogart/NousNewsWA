@@ -21,7 +21,8 @@
     <div v-if="isOpen && chart" class="pc-panel">
       <div class="pc-summary">
         <span class="pc-last">{{ formatPrice(chart.last) }}</span>
-        <span class="pc-range">Low {{ formatPrice(chart.min) }} · High {{ formatPrice(chart.max) }}</span>
+        <span class="pc-range">Low {{ formatPrice(chart.min) }}</span>
+        <span class="pc-range">High {{ formatPrice(chart.max) }}</span>
         <span v-if="current.timeframe" class="pc-range">{{ current.timeframe }} candles, UTC</span>
       </div>
       <div class="pc-frame" @pointerleave="hover = null">
@@ -159,86 +160,88 @@ function onPointer(event) {
 
 <style scoped>
 .pc {
-  border-top: 1px solid var(--line);
-  padding-top: 14px;
+  min-width: 0;
 }
 
 .pc-tabs {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  gap: var(--space-lg);
+  overflow-x: auto;
+  scrollbar-width: none;
+  border-bottom: var(--rule-hair) solid var(--color-ink);
 }
 
 .pc-tab {
   display: inline-flex;
   align-items: baseline;
-  gap: 6px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
+  gap: var(--space-xs);
+  min-height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-bottom: 3px solid transparent;
   background: transparent;
-  padding: 5px 11px;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-muted);
+  white-space: nowrap;
   cursor: pointer;
-  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+  transition: color var(--dur-micro) var(--ease-out), border-color var(--dur-micro) var(--ease-out);
 }
 
 .pc-tab:hover {
-  color: var(--ink);
-  border-color: rgba(15, 20, 30, 0.2);
+  color: var(--color-ink);
+}
+
+.pc-tab:active {
+  color: var(--color-ink-2);
 }
 
 .pc-tab.is-active {
-  color: var(--ink);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.pc-tab:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  color: var(--color-ink);
+  border-bottom-color: var(--color-ink);
 }
 
 .pc-change {
   font-variant-numeric: tabular-nums;
-  font-size: 11.5px;
+  font-weight: 400;
 }
 
 .is-up {
-  color: var(--up);
+  color: var(--color-up);
 }
 
 .is-down {
-  color: var(--down);
+  color: var(--color-down);
 }
 
 .is-flat {
-  color: var(--ink-soft);
+  color: var(--color-muted);
 }
 
 .pc-panel {
-  margin-top: 14px;
+  margin-top: var(--space-md);
 }
 
 .pc-summary {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 4px 14px;
-  margin-bottom: 6px;
+  gap: var(--space-2xs) var(--space-md);
+  margin-bottom: var(--space-xs);
 }
 
 .pc-last {
-  font-size: 20px;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-size: var(--text-3xl);
+  line-height: 1;
+  letter-spacing: var(--tracking-display);
   font-variant-numeric: tabular-nums;
-  color: var(--ink);
+  color: var(--color-ink);
 }
 
 .pc-range {
-  font-size: 12px;
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -254,66 +257,72 @@ function onPointer(event) {
 }
 
 .pc-grid line {
-  stroke: rgba(15, 20, 30, 0.07);
+  stroke: var(--color-rule);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
 .pc-axis text {
-  fill: var(--ink-soft);
-  font-size: 11px;
+  fill: var(--color-muted);
+  font-family: var(--font-body);
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
 .pc-up line,
 .pc-up rect {
-  stroke: var(--up);
-  fill: var(--up);
+  stroke: var(--color-up);
+  fill: var(--color-up);
 }
 
 .pc-down line,
 .pc-down rect {
-  stroke: var(--down);
-  fill: var(--down);
+  stroke: var(--color-down);
+  fill: var(--color-down);
 }
 
 .pc-last-line {
-  stroke: var(--ink);
-  stroke-opacity: 0.35;
+  stroke: var(--color-ink);
+  stroke-opacity: 0.5;
   stroke-dasharray: 3 4;
   vector-effect: non-scaling-stroke;
 }
 
 .pc-cursor {
-  stroke: var(--ink);
-  stroke-opacity: 0.4;
+  stroke: var(--color-ink);
+  stroke-opacity: 0.6;
   vector-effect: non-scaling-stroke;
 }
 
 .pc-tooltip {
   position: absolute;
-  top: 6px;
-  transform: translateX(10px);
+  top: var(--space-xs);
+  transform: translateX(var(--space-sm));
   display: grid;
-  gap: 1px;
-  padding: 7px 9px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: var(--shadow-soft);
-  font-size: 11.5px;
+  gap: var(--space-3xs);
+  padding: var(--space-xs) var(--space-sm);
+  border: var(--rule-hair) solid var(--color-ink);
+  background: var(--color-paper);
+  font-size: var(--text-xs);
   font-variant-numeric: tabular-nums;
-  color: var(--ink-soft);
+  color: var(--color-ink-2);
   pointer-events: none;
   white-space: nowrap;
+  z-index: var(--z-tooltip);
 }
 
 .pc-tooltip.is-left {
-  transform: translateX(calc(-100% - 10px));
+  transform: translateX(calc(-100% - var(--space-sm)));
 }
 
 .pc-tooltip strong {
-  color: var(--ink);
+  color: var(--color-ink);
   font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pc-tab {
+    transition: none;
+  }
 }
 </style>

@@ -4,7 +4,7 @@ Full-stack news platform with a Nuxt 3 frontend, a Django REST API backend, and 
 
 ## Features
 
-- Nuxt 3 SSR frontend with Tailwind styling
+- Nuxt 3 SSR frontend, plain scoped CSS on design tokens (`frontend/assets/css/tokens.css`)
 - Django REST Framework API
 - Postgres-backed agent, seeds, logs, and exports
 - 4-hour intraday briefs, folded into one article per day once the day closes

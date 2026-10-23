@@ -1,7 +1,7 @@
 <template>
   <article class="prose-page">
     <h1>Contact</h1>
-    <p>Spotted an error in a brief, have a source to suggest, or have a question about the site? We'd like to hear from you.</p>
+    <p>Spotted an error in a brief, have a source to suggest, or have a question about the site? We’d like to hear from you.</p>
     <p v-if="email">
       Email: <a :href="`mailto:${email}`">{{ email }}</a>
     </p>

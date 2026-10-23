@@ -1,8 +1,6 @@
 <template>
   <span class="im" :class="`level-${level}`" :title="label" :aria-label="label" role="img">
-    <svg v-for="index in level" :key="index" viewBox="0 0 12 10" fill="currentColor" aria-hidden="true">
-      <path d="M6 1L11 9H1L6 1Z" />
-    </svg>
+    <span v-for="index in 3" :key="index" class="im-bar" :class="{ 'is-on': index <= level }" aria-hidden="true"></span>
   </span>
 </template>
 
@@ -18,36 +16,36 @@ const label = computed(() => LABELS[level.value])
 </script>
 
 <style scoped>
+/* A three-step meter, rising like a signal: filled steps are the score. */
 .im {
   display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  padding: 3px 6px;
-  border-radius: 999px;
-  border: 1px solid transparent;
+  align-items: flex-end;
+  gap: var(--space-3xs);
+  height: var(--space-md);
 }
 
-.im svg {
-  width: 10px;
-  height: 9px;
-  display: block;
+.im-bar {
+  width: var(--space-2xs);
+  background: var(--color-rule);
 }
 
-.level-1 {
-  color: #7b661d;
-  background: rgba(188, 142, 43, 0.12);
-  border-color: rgba(188, 142, 43, 0.28);
+.im-bar:nth-child(1) {
+  height: 40%;
 }
 
-.level-2 {
-  color: #6f4f17;
-  background: rgba(184, 116, 33, 0.14);
-  border-color: rgba(184, 116, 33, 0.3);
+.im-bar:nth-child(2) {
+  height: 70%;
 }
 
-.level-3 {
-  color: #8d2f2f;
-  background: rgba(179, 75, 75, 0.14);
-  border-color: rgba(179, 75, 75, 0.34);
+.im-bar:nth-child(3) {
+  height: 100%;
+}
+
+.im-bar.is-on {
+  background: var(--color-ink);
+}
+
+.level-3 .im-bar.is-on {
+  background: var(--color-accent);
 }
 </style>

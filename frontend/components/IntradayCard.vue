@@ -1,22 +1,37 @@
 <template>
-  <article class="card" :class="{ 'is-current': isCurrent }">
-    <p v-if="isCurrent" class="card-live">
-      <span class="card-live-dot" aria-hidden="true"></span>
-      {{ card.id ? 'Live: updating through this 4-hour block' : 'Waiting for the first stories of this block' }}
-    </p>
-    <h2 class="card-title">
-      <NuxtLink v-if="card.slug || card.id" :to="`/articles/${card.slug || card.id}`">{{ card.title || 'Market brief' }}</NuxtLink>
-      <template v-else>{{ card.title || 'Market brief' }}</template>
-    </h2>
-    <div class="card-meta">
+  <article v-if="isCurrent" class="lead-story">
+    <div class="lead-text">
+      <p class="lead-live" role="status">
+        {{ card.id ? 'Live: updating through this 4-hour block' : 'Waiting for the first stories of this block' }}
+      </p>
+      <h2 class="lead-title">
+        <NuxtLink v-if="link" :to="link">{{ card.title || 'Market brief' }}</NuxtLink>
+        <template v-else>{{ card.title || 'Market brief' }}</template>
+      </h2>
+      <div class="lead-facts">
+        <time :datetime="card.period_start">{{ timeRange }}</time>
+        <ImportanceMarker :score="card.importance_score" />
+      </div>
+      <p class="lead-summary">{{ card.summary || 'No summary yet.' }}</p>
+      <NuxtLink v-if="link" :to="link" class="btn btn--ink lead-more">Read the full brief</NuxtLink>
+    </div>
+    <PriceChart class="lead-chart" :series="card.price_series || []" :initially-open="true" />
+  </article>
+
+  <article v-else class="story">
+    <div class="story-facts">
       <time :datetime="card.period_start">{{ timeRange }}</time>
       <ImportanceMarker :score="card.importance_score" />
     </div>
-    <p class="card-summary">{{ card.summary || 'No summary yet.' }}</p>
-    <NuxtLink v-if="card.slug || card.id" :to="`/articles/${card.slug || card.id}`" class="card-readmore">
-      Read the full brief
-    </NuxtLink>
-    <PriceChart class="card-chart" :series="card.price_series || []" :initially-open="isCurrent" />
+    <div class="story-body">
+      <h2 class="story-title">
+        <NuxtLink v-if="link" :to="link">{{ card.title || 'Market brief' }}</NuxtLink>
+        <template v-else>{{ card.title || 'Market brief' }}</template>
+      </h2>
+      <p class="story-summary">{{ card.summary || 'No summary yet.' }}</p>
+      <NuxtLink v-if="link" :to="link" class="text-link story-more">Read the full brief</NuxtLink>
+      <PriceChart class="story-chart" :series="card.price_series || []" />
+    </div>
   </article>
 </template>
 
@@ -26,6 +41,8 @@ const props = defineProps({
   isCurrent: { type: Boolean, default: false },
 })
 
+const link = computed(() => (props.card.slug || props.card.id ? `/articles/${props.card.slug || props.card.id}` : ''))
+
 // UTC like the periods and chart axes; local time also differed between SSR and hydration.
 const timeRange = computed(() => {
   const start = new Date(props.card.period_start || props.card.hour_start || '')
@@ -33,131 +50,78 @@ const timeRange = computed(() => {
   const end = new Date(props.card.period_end || start.getTime() + 4 * 3600 * 1000)
   const day = start.toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: 'UTC' })
   const hh = (d) => String(d.getUTCHours()).padStart(2, '0')
-  return `${day}, ${hh(start)}:00–${hh(end)}:00 UTC`
+  return `${day}, ${hh(start)}:00 to ${hh(end)}:00 UTC`
 })
 </script>
 
 <style scoped>
-.card {
-  background: var(--glass);
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  padding: 20px 24px;
-  box-shadow: var(--shadow-soft);
-  margin-bottom: 16px;
+.lead-story {
+  display: grid;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--gap-columns);
+  row-gap: var(--space-xl);
+  align-items: start;
+  padding-block: var(--space-md) var(--space-2xl);
+  border-top: var(--rule-bar) solid var(--color-ink);
 }
 
-.card.is-current {
-  padding: 26px 28px;
-  box-shadow: var(--shadow);
-  margin-bottom: 8px;
+.lead-text {
+  grid-column: 1 / span 5;
+  min-width: 0;
 }
 
-.card-live {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 0 10px;
-  font-size: 12.5px;
-  color: var(--accent);
+.lead-chart {
+  grid-column: 7 / span 6;
+  min-width: 0;
 }
 
-.card-live-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: var(--accent);
-  animation: pulse 2s ease-in-out infinite;
-}
-
-@keyframes pulse {
-  50% {
-    opacity: 0.25;
-  }
-}
-
-.card-title {
-  margin: 0;
-  font-size: 19px;
-  line-height: 1.35;
+.lead-live {
+  margin-bottom: var(--space-sm);
+  font-size: var(--text-sm);
   font-weight: 600;
-  color: var(--ink);
+  color: var(--color-accent);
 }
 
-.card.is-current .card-title {
-  font-size: 27px;
-  line-height: 1.25;
-  letter-spacing: -0.01em;
+.lead-title {
+  max-width: 22ch;
+  font-size: clamp(1.75rem, 1.6vw + 0.75rem, 2.5rem);
+  line-height: 1.08;
 }
 
-.card-title a {
-  color: inherit;
+.lead-title a {
   text-decoration: none;
 }
 
-.card-title a:hover {
+.lead-title a:hover {
   text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 3px;
+  text-decoration-thickness: 2px;
 }
 
-.card-meta {
+.lead-facts {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
-  margin-top: 8px;
-  font-size: 12.5px;
-  color: var(--ink-soft);
+  gap: var(--space-xs) var(--space-md);
+  margin-top: var(--space-md);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
 }
 
-.card-summary {
-  margin: 14px 0 0;
-  font-size: 15.5px;
-  line-height: 1.7;
-  color: var(--ink-soft);
-  display: -webkit-box;
-  -webkit-line-clamp: 5;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+.lead-summary {
+  margin-top: var(--space-md);
+  max-width: 60ch;
+  font-size: var(--text-md);
+  line-height: 1.6;
 }
 
-.card.is-current .card-summary {
-  -webkit-line-clamp: none;
-  font-size: 17px;
-  color: var(--ink);
+.lead-more {
+  margin-top: var(--space-lg);
 }
 
-.card-readmore {
-  display: inline-block;
-  margin-top: 10px;
-  font-size: 13.5px;
-  font-weight: 500;
-  color: var(--accent);
-  text-decoration: none;
-}
-
-.card-readmore:hover {
-  text-decoration: underline;
-}
-
-.card-chart {
-  margin-top: 18px;
-}
-
-@media (max-width: 640px) {
-  .card,
-  .card.is-current {
-    padding: 16px;
-  }
-
-  .card.is-current .card-title {
-    font-size: 22px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .card-live-dot {
-    animation: none;
+@media (max-width: 60rem) {
+  .lead-text,
+  .lead-chart {
+    grid-column: 1 / -1;
   }
 }
 </style>

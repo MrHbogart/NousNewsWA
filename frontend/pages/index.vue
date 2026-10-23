@@ -1,19 +1,17 @@
 <template>
-  <div class="page-container">
-    <header class="page-intro">
-      <h1 class="page-title">What moved the markets today</h1>
-      <p class="page-lede">
+  <div class="front">
+    <header class="front-head">
+      <h1 class="front-title">What moved the markets today</h1>
+      <p class="lead front-lede">
         A new brief every 4 hours on what happened and how prices reacted. Each past day is summed up in one article.
       </p>
     </header>
 
     <!-- Current 4-hour block (always at top) -->
-    <div v-if="currentCard && !timeframe" class="current-card-section">
-      <IntradayCard :card="currentCard" :is-current="true" />
-    </div>
+    <IntradayCard v-if="currentCard && !timeframe" :card="currentCard" :is-current="true" />
 
     <!-- Historical cards, newest first (today's 4-hour briefs, then one article per past day) -->
-    <div class="cards-stack">
+    <div class="feed">
       <template v-for="card in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`">
         <DailyCard
           v-if="card.is_daily_summary"
@@ -26,21 +24,16 @@
       <div ref="sentinel" class="scroll-sentinel"></div>
 
       <!-- End of list indicator -->
-      <div v-if="!infiniteScroll.hasMore && totalCards > 0" class="end-of-list">
-        <div class="end-of-list-visual"></div>
-        <p class="end-of-list-text">You've reached the beginning of our records</p>
-      </div>
+      <p v-if="!infiniteScroll.hasMore && totalCards > 0" class="feed-note feed-end">You’ve reached the beginning of our records</p>
 
       <!-- Empty state -->
-      <div v-if="totalCards === 0 && !infiniteScroll.isLoading" class="empty-state">
-        <p class="empty-state-text">No articles available yet. Check back soon.</p>
-      </div>
+      <p v-if="totalCards === 0 && !infiniteScroll.isLoading" class="feed-note">No articles available yet. Check back soon.</p>
 
       <!-- Loading indicator -->
-      <div v-if="infiniteScroll.isLoading" class="loading-indicator">
-        <div class="loading-spinner"></div>
-        <p>Loading more articles...</p>
-      </div>
+      <p v-if="infiniteScroll.isLoading" class="feed-note feed-loading" role="status">
+        <span class="feed-spinner keep-motion" aria-hidden="true"></span>
+        Loading more articles…
+      </p>
     </div>
   </div>
 </template>
@@ -126,43 +119,29 @@ useSeoMeta({
 </script>
 
 <style scoped>
-.page-container {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  padding-bottom: 48px;
+.front-head {
+  container-type: inline-size;
+  padding-block: var(--space-lg) var(--space-md);
 }
 
-.page-intro {
-  padding-top: 32px;
+/* Fitted to the measure: one line of Six Caps across the twelve columns. */
+.front-title {
+  max-width: none;
+  font-size: 14.6cqi;
+  line-height: 0.88;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
-.page-title {
-  margin: 0;
-  font-size: 26px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  color: var(--ink);
-}
-
-.page-lede {
-  margin: 8px 0 0;
+.front-lede {
+  margin-top: var(--space-md);
   max-width: 60ch;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--ink-soft);
+  color: var(--color-ink-2);
 }
 
-.current-card-section {
-  padding-top: 24px;
-  padding-bottom: 0;
-}
-
-.cards-stack {
+.feed {
   display: flex;
   flex-direction: column;
-  gap: 0;
-  margin-top: 24px;
 }
 
 .scroll-sentinel {
@@ -170,73 +149,25 @@ useSeoMeta({
   visibility: hidden;
 }
 
-.end-of-list {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 60px 20px;
-  margin-top: 40px;
-}
-
-.end-of-list-visual {
-  width: 40px;
-  height: 2px;
-  background: linear-gradient(to right, transparent, var(--line), transparent);
-  position: relative;
-}
-
-.end-of-list-visual::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 6px;
-  height: 6px;
-  background: var(--ink-soft);
-  border-radius: 50%;
-}
-
-.end-of-list-text {
-  margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink-soft);
-  text-align: center;
-}
-
-.empty-state {
+.feed-note {
   display: flex;
   align-items: center;
-  justify-content: center;
-  padding: 80px 20px;
-  text-align: center;
+  gap: var(--space-sm);
+  padding-block: var(--space-xl);
+  border-top: var(--rule-hair) solid var(--color-rule);
+  color: var(--color-muted);
 }
 
-.empty-state-text {
-  margin: 0;
-  font-size: 15px;
-  color: var(--ink-soft);
-  max-width: 300px;
+.feed-end {
+  margin-top: var(--space-xl);
+  border-top: var(--rule-bar) solid var(--color-ink);
 }
 
-.loading-indicator {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  padding: 40px 20px;
-}
-
-.loading-spinner {
-  width: 24px;
-  height: 24px;
-  border: 2px solid var(--line);
-  border-top-color: var(--accent);
+.feed-spinner {
+  width: var(--space-md);
+  height: var(--space-md);
+  border: 2px solid var(--color-rule);
+  border-top-color: var(--color-ink);
   border-radius: 50%;
   animation: spin 800ms linear infinite;
 }
@@ -247,23 +178,9 @@ useSeoMeta({
   }
 }
 
-.loading-indicator p {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-@media (max-width: 640px) {
-  .page-container {
-    padding-bottom: 32px;
-  }
-
-  .current-card-section {
-    padding-top: 24px;
-  }
-
-  .cards-stack {
-    margin-top: 16px;
+@media (prefers-reduced-motion: reduce) {
+  .feed-spinner {
+    animation-duration: 2400ms;
   }
 }
 </style>

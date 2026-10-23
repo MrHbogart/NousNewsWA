@@ -12,7 +12,7 @@ export default defineNuxtConfig({
   experimental: {
     appManifest: false,
   },
-  css: ['~/assets/css/fonts.css', '~/assets/css/tailwind.css', '~/assets/css/app.css'],
+  css: ['~/assets/css/app.css'],
   // Defaults only: Nuxt overrides these at runtime from NUXT_API_BASE_URL
   // (server-side/SSR calls), NUXT_PUBLIC_API_BASE_URL (browser) and
   // NUXT_PUBLIC_SITE_DOMAIN. process.env here would be frozen at build time.
@@ -45,21 +45,21 @@ export default defineNuxtConfig({
           name: 'description',
           content: 'Market news every 4 hours: what happened and how prices reacted.',
         },
-        { name: 'theme-color', content: '#0b0d10' },
+        { name: 'theme-color', content: '#e8dfca' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
       link: [
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        {
+          rel: 'stylesheet',
+          href: 'https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@400;600&family=Bevan&family=Six+Caps&display=swap',
+        },
         { rel: 'alternate', type: 'application/rss+xml', title: 'NousNews', href: '/rss.xml' },
         { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
         { rel: 'icon', type: 'image/png', sizes: '48x48', href: '/favicon-48.png' },
         { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
       ],
-    },
-  },
-  postcss: {
-    plugins: {
-      tailwindcss: {},
-      autoprefixer: {},
     },
   },
 })

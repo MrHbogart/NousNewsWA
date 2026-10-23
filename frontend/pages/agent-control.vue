@@ -27,7 +27,7 @@
           required
         >
         <button type="submit" class="control-btn control-btn-primary" :disabled="loginPending">
-          {{ loginPending ? 'Signing in...' : 'Sign in' }}
+          {{ loginPending ? 'Signing in…' : 'Sign in' }}
         </button>
       </form>
 
@@ -39,7 +39,7 @@
         <div class="control-card-header">
           <h2 class="control-card-title">Runtime State</h2>
           <button type="button" class="control-link-btn" :disabled="refreshPending" @click="refreshDashboard">
-            {{ refreshPending ? 'Refreshing...' : 'Refresh' }}
+            {{ refreshPending ? 'Refreshing…' : 'Refresh' }}
           </button>
         </div>
         <div class="control-stats-grid">
@@ -74,19 +74,19 @@
         <h2 class="control-card-title">Actions</h2>
         <div class="control-actions">
           <button type="button" class="control-btn control-btn-primary" :disabled="runOnceDisabled" @click="runAction('runOnce')">
-            {{ actionPending === 'runOnce' ? 'Running...' : 'Run Once' }}
+            {{ actionPending === 'runOnce' ? 'Running…' : 'Run Once' }}
           </button>
           <button type="button" class="control-btn" :disabled="startDisabled" @click="runAction('start')">
-            {{ actionPending === 'start' ? 'Starting...' : 'Start Loop' }}
+            {{ actionPending === 'start' ? 'Starting…' : 'Start Loop' }}
           </button>
           <button type="button" class="control-btn" :disabled="pauseDisabled" @click="runAction('pause')">
-            {{ actionPending === 'pause' ? 'Pausing...' : 'Pause' }}
+            {{ actionPending === 'pause' ? 'Pausing…' : 'Pause' }}
           </button>
           <button type="button" class="control-btn" :disabled="resumeDisabled" @click="runAction('resume')">
-            {{ actionPending === 'resume' ? 'Resuming...' : 'Resume' }}
+            {{ actionPending === 'resume' ? 'Resuming…' : 'Resume' }}
           </button>
           <button type="button" class="control-btn control-btn-danger" :disabled="stopDisabled" @click="runAction('stop')">
-            {{ actionPending === 'stop' ? 'Stopping...' : 'Stop' }}
+            {{ actionPending === 'stop' ? 'Stopping…' : 'Stop' }}
           </button>
         </div>
         <p v-if="actionMessage" class="control-muted control-status">{{ actionMessage }}</p>
@@ -320,7 +320,7 @@ function formatMap(mapLike) {
   if (!mapLike || typeof mapLike !== 'object') return '-'
   const entries = Object.entries(mapLike)
   if (!entries.length) return '-'
-  return entries.map(([k, v]) => `${k}:${v}`).join(' · ')
+  return entries.map(([k, v]) => `${k} ${v}`).join(', ')
 }
 
 function formatMetadata(metadata) {
@@ -369,130 +369,148 @@ useHead({
 
 <style scoped>
 .control-page {
-  padding: 30px 0 54px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: var(--space-lg);
+  padding-block: var(--space-xl) 0;
 }
 
 .control-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: var(--space-sm);
 }
 
 .control-back {
-  color: var(--ink-soft);
-  text-decoration: none;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: underline;
 }
 
 .control-back:hover {
-  color: var(--ink);
+  color: var(--color-accent);
 }
 
 .control-title-wrap {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--space-xs);
 }
 
 .control-title {
-  margin: 0;
-  font-size: 30px;
-  line-height: 1.2;
-  color: var(--ink);
+  font-size: var(--text-display-s);
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .control-subtitle {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 14px;
+  color: var(--color-muted);
 }
 
+/* State and actions side by side, statistics and logs across. */
 .control-grid {
   display: grid;
-  grid-template-columns: 1fr;
-  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-xl) var(--gap-columns);
 }
 
 .control-card {
-  border: 1px solid var(--line);
-  border-radius: var(--radius);
-  background: var(--glass);
-  box-shadow: var(--shadow-soft);
-  padding: 16px;
+  min-width: 0;
+  padding-top: var(--space-sm);
+  border-top: var(--rule-bar) solid var(--color-ink);
+}
+
+.control-logs,
+.control-card:nth-child(3) {
+  grid-column: 1 / -1;
+}
+
+.control-login {
+  max-width: 28rem;
 }
 
 .control-card-header {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
-  gap: 12px;
-  margin-bottom: 12px;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-sm);
 }
 
 .control-card-title {
-  margin: 0;
-  font-size: 16px;
-  color: var(--ink);
+  min-width: 0;
+  overflow-wrap: break-word;
+  font-size: var(--text-lg);
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.control-card > .control-card-title {
+  margin-bottom: var(--space-sm);
 }
 
 .control-muted {
-  color: var(--ink-soft);
-  font-size: 12px;
+  font-size: var(--text-sm);
+  color: var(--color-muted);
 }
 
 .control-login-form {
-  margin-top: 12px;
   display: grid;
-  gap: 10px;
-  max-width: 420px;
+  gap: var(--space-xs);
+  margin-top: var(--space-md);
 }
 
 .control-label {
-  font-size: 12px;
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
 }
 
 .control-input {
   width: 100%;
-  border: 1px solid var(--line);
-  background: #fff;
-  color: var(--ink);
-  border-radius: 10px;
-  padding: 10px 12px;
-  font-size: 14px;
+  min-height: var(--control-h-app);
+  padding-inline: var(--space-sm);
+  border: var(--rule-hair) solid var(--color-muted);
+  border-radius: var(--radius-card);
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-size: var(--text-md);
 }
 
 .control-input:focus-visible {
-  outline: 2px solid rgba(29, 78, 216, 0.2);
-  border-color: rgba(29, 78, 216, 0.3);
+  outline: 2px solid var(--color-focus);
+  outline-offset: -2px;
 }
 
 .control-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--space-xs);
 }
 
 .control-btn {
-  border: 1px solid var(--line);
-  background: #fff;
-  color: var(--ink);
-  border-radius: 8px;
-  padding: 8px 12px;
-  font-size: 12px;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--control-h-app);
+  padding-inline: var(--space-md);
+  border: var(--rule-hair) solid var(--color-ink);
+  border-radius: var(--radius-card);
+  background: transparent;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
   cursor: pointer;
+  transition: background-color var(--dur-micro) var(--ease-out);
 }
 
 .control-btn:hover:not(:disabled) {
-  border-color: rgba(15, 20, 30, 0.18);
+  background: var(--color-paper-2);
+}
+
+.control-btn:active:not(:disabled) {
+  background: var(--color-paper-3);
 }
 
 .control-btn:disabled {
@@ -501,175 +519,166 @@ useHead({
 }
 
 .control-btn-primary {
-  border-color: rgba(29, 78, 216, 0.25);
-  color: #11367f;
-  background: rgba(29, 78, 216, 0.08);
+  background: var(--color-ink);
+  color: var(--color-paper);
+}
+
+.control-btn-primary:hover:not(:disabled) {
+  background: var(--color-ink-2);
+}
+
+.control-btn-primary:active:not(:disabled) {
+  background: var(--color-ink);
 }
 
 .control-btn-danger {
-  border-color: rgba(180, 70, 70, 0.2);
-  color: #7f2929;
-  background: rgba(180, 70, 70, 0.06);
+  border-color: var(--color-error);
+  color: var(--color-error);
 }
 
 .control-link-btn {
+  min-height: var(--control-h-app);
+  padding: 0;
   border: 0;
   background: transparent;
-  color: var(--ink-soft);
-  font-size: 12px;
+  color: var(--color-ink);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-decoration: underline;
+  white-space: nowrap;
   cursor: pointer;
-  padding: 0;
 }
 
 .control-link-btn:hover:not(:disabled) {
-  color: var(--ink);
+  color: var(--color-accent);
+}
+
+.control-link-btn:active:not(:disabled) {
+  color: var(--color-ink-2);
+}
+
+.control-link-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .control-stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
+  column-gap: var(--gap-columns);
 }
 
 .control-stat {
-  padding: 8px 10px;
-  border: 1px solid rgba(15, 20, 30, 0.07);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.55);
   display: flex;
-  flex-direction: column;
-  gap: 4px;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-sm);
+  padding-block: var(--space-xs);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
 }
 
 .control-stat-label {
-  font-size: 11px;
-  color: var(--ink-soft);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-size: var(--text-sm);
+  color: var(--color-muted);
 }
 
 .control-stat-value {
-  font-size: 13px;
-  line-height: 1.3;
-  color: var(--ink);
-}
-
-.control-logs {
-  padding-bottom: 8px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .control-log-list {
-  list-style: none;
+  max-height: 32rem;
   margin: 0;
   padding: 0;
-  display: grid;
-  gap: 8px;
-  max-height: 480px;
   overflow: auto;
+  list-style: none;
+  border-top: var(--rule-hair) solid var(--color-ink);
 }
 
 .control-log-item {
-  border: 1px solid rgba(15, 20, 30, 0.08);
-  border-radius: 8px;
-  padding: 8px 10px;
-  background: rgba(255, 255, 255, 0.7);
+  padding-block: var(--space-sm);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
 }
 
 .control-log-top {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 11px;
+  align-items: baseline;
+  gap: var(--space-sm);
+  font-size: var(--text-sm);
 }
 
 .control-log-step {
-  color: var(--ink);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  font-weight: 600;
 }
 
 .control-log-level {
-  border-radius: 99px;
-  padding: 1px 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  font-size: 10px;
-}
-
-.control-log-level.level-info {
-  color: #0f3f93;
-  background: rgba(29, 78, 216, 0.1);
+  color: var(--color-muted);
 }
 
 .control-log-level.level-warn {
-  color: #8b5a06;
-  background: rgba(191, 128, 0, 0.12);
+  color: var(--color-ink);
+  font-weight: 600;
 }
 
 .control-log-level.level-error {
-  color: #8b2525;
-  background: rgba(170, 44, 44, 0.12);
+  color: var(--color-error);
+  font-weight: 600;
 }
 
 .control-log-time {
-  color: var(--ink-soft);
   margin-left: auto;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .control-log-message {
-  margin: 5px 0 0;
-  font-size: 12px;
-  color: var(--ink-soft);
+  margin-top: var(--space-2xs);
 }
 
 .control-log-content {
-  margin: 6px 0 0;
-  padding: 8px;
-  border-radius: 6px;
-  border: 1px solid rgba(15, 20, 30, 0.08);
-  background: rgba(255, 255, 255, 0.9);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  font-size: 11px;
-  line-height: 1.4;
-  color: #1b1f24;
-  max-height: 220px;
+  max-height: 14rem;
+  margin: var(--space-xs) 0 0;
+  padding: var(--space-xs) var(--space-sm);
   overflow: auto;
+  background: var(--color-paper-2);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
 }
 
 .control-log-meta {
-  margin: 6px 0 0;
-  font-size: 11px;
-  color: #5a616a;
+  margin-top: var(--space-2xs);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+  overflow-wrap: anywhere;
 }
 
 .control-error {
-  margin: 10px 0 0;
-  color: #8b2525;
-  font-size: 12px;
+  margin-top: var(--space-sm);
+  font-size: var(--text-sm);
+  color: var(--color-error);
 }
 
 .control-status {
-  margin: 10px 0 0;
+  margin-top: var(--space-sm);
 }
 
-@media (max-width: 640px) {
-  .control-page {
-    padding-top: 24px;
-  }
-
-  .control-title {
-    font-size: 24px;
-  }
-
+@media (max-width: 60rem) {
+  .control-grid,
   .control-stats-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
+}
 
-  .control-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+@media (prefers-reduced-motion: reduce) {
+  .control-btn {
+    transition: none;
   }
 }
 </style>

@@ -1,87 +1,53 @@
 <template>
-  <section class="space-y-6">
-    <NuxtLink
-      to="/"
-      class="inline-flex items-center gap-2 text-xs text-ink-500 transition hover:text-ink-900"
-    >
-      <span class="h-px w-10 bg-ink-900/20" />
-      Back to brief
-    </NuxtLink>
+  <section class="article-page">
+    <NuxtLink to="/" class="text-link article-back">Back to brief</NuxtLink>
 
-    <div
-      v-if="pending"
-      class="rounded-2xl border border-ink-900/10 bg-white p-6 text-ink-500"
-    >
-      Loading report...
-    </div>
+    <p v-if="pending" class="article-state">Loading report…</p>
 
-    <div
-      v-else-if="error"
-      class="rounded-2xl border border-ember-500/40 bg-white p-6 text-ember-600"
-    >
+    <p v-else-if="error" class="article-state is-error">
       This report could not be loaded. Verify the article ID and API base URL.
-    </div>
+    </p>
 
-    <article v-else class="article-layout">
-      <Transition name="update-banner">
-        <div
-          v-if="hasPendingArticleUpdate"
-          class="rounded-xl border border-sky-500/30 bg-sky-50 px-4 py-3 text-sky-800"
-        >
-          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <p class="text-sm">
-              A newer version of this article is available.
-            </p>
-            <button
-              type="button"
-              class="inline-flex items-center justify-center rounded-md border border-sky-500/40 bg-white px-3 py-1.5 text-xs font-medium uppercase tracking-[0.08em] text-sky-700 transition hover:bg-sky-100"
-              @click="applyPendingUpdate"
-            >
-              Load update
-            </button>
-          </div>
-        </div>
-      </Transition>
-
-      <div
-        v-if="displayedArticle?.day_article"
-        class="rounded-xl border border-ink-900/10 bg-white px-4 py-3 text-sm text-ink-700"
-      >
-        This 4-hour brief is part of the full day's article:
-        <NuxtLink :to="`/articles/${displayedArticle.day_article.slug}`" class="font-medium text-ink-900 underline">
-          {{ displayedArticle.day_article.title || 'Read the whole day' }}
-        </NuxtLink>
+    <article v-else class="article">
+      <div v-if="hasPendingArticleUpdate" class="article-update" role="status">
+        <p>A newer version of this article is available.</p>
+        <button type="button" class="btn article-update-btn" @click="applyPendingUpdate">Load update</button>
       </div>
 
-      <Transition name="article-fade" mode="out-in">
-        <div :key="articleRenderKey" class="article-stack">
-          <header class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
-            <p class="article-kicker">
-              {{ kindLabel }}<span v-if="periodLabel">, {{ periodLabel }}</span>
-            </p>
-            <h1 class="article-title">{{ displayedArticle?.title || 'Untitled report' }}</h1>
-            <p v-if="cleanSummary" class="article-lead">{{ cleanSummary }}</p>
-            <div class="article-meta">
-              <ImportanceMarker :score="displayedArticle?.importance_score" />
-              <span v-if="readingMinutes">{{ readingMinutes }} min read</span>
-              <span v-if="updatedLabel">Updated {{ updatedLabel }}</span>
-            </div>
-            <div class="article-share">
-              <button type="button" class="share-btn" @click="copyLink">{{ copied ? 'Link copied' : 'Copy link' }}</button>
-              <a class="share-btn" :href="shareLinks.x" target="_blank" rel="noopener noreferrer">Share on X</a>
-              <a class="share-btn" :href="shareLinks.linkedin" target="_blank" rel="noopener noreferrer">Share on LinkedIn</a>
-            </div>
-          </header>
+      <p v-if="displayedArticle?.day_article" class="article-dayline">
+        This 4-hour brief is part of the full day’s article:
+        <NuxtLink :to="`/articles/${displayedArticle.day_article.slug}`" class="text-link">
+          {{ displayedArticle.day_article.title || 'Read the whole day' }}
+        </NuxtLink>
+      </p>
 
+      <div :key="articleRenderKey" class="article-stack">
+        <header class="article-head">
+          <h1 class="article-title">{{ displayedArticle?.title || 'Untitled report' }}</h1>
+          <div class="article-meta">
+            <span class="article-kind">{{ kindLabel }}<span v-if="periodLabel">, {{ periodLabel }}</span></span>
+            <ImportanceMarker :score="displayedArticle?.importance_score" />
+            <span v-if="readingMinutes">{{ readingMinutes }} min read</span>
+            <span v-if="updatedLabel">Updated {{ updatedLabel }}</span>
+          </div>
+          <p v-if="cleanSummary" class="lead article-lead">{{ cleanSummary }}</p>
+          <div class="article-share">
+            <button type="button" class="btn" @click="copyLink">{{ copied ? 'Link copied' : 'Copy link' }}</button>
+            <a class="btn" :href="shareLinks.x" target="_blank" rel="noopener noreferrer">Share on X</a>
+            <a class="btn" :href="shareLinks.linkedin" target="_blank" rel="noopener noreferrer">Share on LinkedIn</a>
+          </div>
+        </header>
+
+        <div class="article-columns">
           <section v-if="takeaways.length" class="takeaways" aria-labelledby="takeaways-title">
-            <h2 id="takeaways-title">Key takeaways</h2>
+            <h2 id="takeaways-title" class="takeaways-title">Key takeaways</h2>
             <ul>
               <li v-for="item in takeaways" :key="item">{{ item }}</li>
             </ul>
           </section>
 
-          <div class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
-            <div v-if="articleBlocks.length" class="article-body-content">
+          <div class="article-body">
+            <template v-if="articleBlocks.length">
               <template v-for="(block, index) in articleBlocks" :key="index">
                 <h2 v-if="block.type === 'h2'">{{ block.text }}</h2>
                 <ul v-else-if="block.type === 'ul'">
@@ -89,59 +55,63 @@
                 </ul>
                 <p v-else>{{ block.text }}</p>
               </template>
-            </div>
-            <p v-else class="text-ink-400">The full text of this brief isn't available yet.</p>
+            </template>
+            <p v-else class="article-empty">The full text of this brief isn’t available yet.</p>
           </div>
+        </div>
 
-          <section v-if="performance.length" class="rounded-2xl border border-ink-900/10 bg-white p-6 sm:p-8">
-            <h2 class="section-title">How markets moved{{ displayedArticle?.kind === 'aftermath' ? ' after the brief' : ' in this period' }}</h2>
-            <div class="perf-wrap">
-              <table class="perf">
-                <thead>
-                  <tr><th scope="col">Market</th><th scope="col">Open</th><th scope="col">Last</th><th scope="col">Change</th><th scope="col">Range</th></tr>
-                </thead>
-                <tbody>
-                  <tr v-for="row in performance" :key="row.label">
-                    <th scope="row">{{ row.label }}</th>
-                    <td>{{ formatPrice(row.open) }}</td>
-                    <td>{{ formatPrice(row.close) }}</td>
-                    <td :class="`is-${changeDirection(row.pct)}`">{{ formatChange(row.pct) }}</td>
-                    <td>{{ formatPrice(row.low) }} – {{ formatPrice(row.high) }}</td>
-                  </tr>
-                </tbody>
-              </table>
-            </div>
-            <PriceChart class="mt-5" :series="priceSeriesList" initially-open />
-          </section>
-
-          <div v-if="aftermathLink" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-            <NuxtLink :to="`/articles/${aftermathLink.slug}`" class="text-sm font-medium text-ink-900 underline">
-              What happened to prices after this brief
-            </NuxtLink>
+        <section v-if="performance.length" class="article-section" aria-labelledby="markets-title">
+          <h2 id="markets-title" class="rule-head">
+            How markets moved{{ displayedArticle?.kind === 'aftermath' ? ' after the brief' : ' in this period' }}
+          </h2>
+          <div class="perf-wrap">
+            <table class="perf">
+              <thead>
+                <tr><th scope="col">Market</th><th scope="col">Open</th><th scope="col">Last</th><th scope="col">Change</th><th scope="col">Range</th></tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in performance" :key="row.label">
+                  <th scope="row">{{ row.label }}</th>
+                  <td>{{ formatPrice(row.open) }}</td>
+                  <td>{{ formatPrice(row.close) }}</td>
+                  <td :class="`is-${changeDirection(row.pct)}`">{{ formatChange(row.pct) }}</td>
+                  <td>{{ formatPrice(row.low) }} to {{ formatPrice(row.high) }}</td>
+                </tr>
+              </tbody>
+            </table>
           </div>
+          <PriceChart class="perf-chart" :series="priceSeriesList" initially-open />
+        </section>
 
-          <div v-if="relatedLinks.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-            <h2 class="section-title">Also in this period</h2>
-            <ul class="mt-3 space-y-2 text-sm text-ink-700">
+        <p v-if="aftermathLink" class="article-section article-aftermath">
+          <NuxtLink :to="`/articles/${aftermathLink.slug}`" class="text-link">
+            What happened to prices after this brief
+          </NuxtLink>
+        </p>
+
+        <div class="article-refs">
+          <section v-if="relatedLinks.length" class="article-section" aria-labelledby="related-title">
+            <h2 id="related-title" class="rule-head">Also in this period</h2>
+            <ul class="related">
               <li v-for="item in relatedLinks" :key="item.uuid">
-                <NuxtLink :to="`/articles/${item.slug || item.uuid}`" class="hover:text-ink-900">
+                <NuxtLink :to="`/articles/${item.slug || item.uuid}`">
                   {{ item.title || 'Untitled brief' }}
                 </NuxtLink>
               </li>
             </ul>
-          </div>
+          </section>
 
-          <div v-if="references.length" class="rounded-2xl border border-ink-900/10 bg-white p-6">
-            <h2 class="section-title">Sources</h2>
+          <section v-if="references.length" class="article-section" aria-labelledby="sources-title">
+            <h2 id="sources-title" class="rule-head">Sources</h2>
             <ol class="sources">
               <li v-for="ref in references" :key="ref.url">
                 <a :href="ref.url" target="_blank" rel="noopener noreferrer nofollow">{{ ref.host }}</a>
                 <span class="sources-path">{{ ref.path }}</span>
               </li>
             </ol>
-          </div>
+          </section>
         </div>
-      </Transition>
+      </div>
     </article>
   </section>
 </template>
@@ -151,15 +121,6 @@ const route = useRoute()
 const api = useNewsApi()
 const config = useRuntimeConfig()
 const articleId = computed(() => String(route.params.id || ''))
-
-function resetArticleScroll() {
-  if (!process.client) return
-  const main = document.querySelector('.app-main')
-  if (main && typeof main.scrollTo === 'function') {
-    main.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-  }
-  window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
-}
 
 function cloneArticlePayload(payload) {
   if (!payload || typeof payload !== 'object') return null
@@ -269,17 +230,6 @@ function applyPendingUpdate() {
   displayedArticle.value = cloneArticlePayload(pendingArticleUpdate.value)
   pendingArticleUpdate.value = null
 }
-
-onMounted(() => {
-  resetArticleScroll()
-})
-
-watch(
-  () => route.fullPath,
-  () => {
-    resetArticleScroll()
-  }
-)
 
 const hasPendingArticleUpdate = computed(() => Boolean(pendingArticleUpdate.value))
 const articleRenderKey = computed(() => articleFingerprint(displayedArticle.value))
@@ -410,369 +360,323 @@ useHead(() => ({
 </script>
 
 <style scoped>
-.article-fade-enter-active,
-.article-fade-leave-active {
-  transition: opacity 260ms ease, transform 260ms ease;
+.article-page {
+  padding-block: var(--space-xl) 0;
 }
 
-.article-fade-enter-from,
-.article-fade-leave-to {
-  opacity: 0;
-  transform: translateY(8px);
+.article-back {
+  font-size: var(--text-sm);
 }
 
-.update-banner-enter-active,
-.update-banner-leave-active {
-  transition: opacity 220ms ease, transform 220ms ease;
+.article-state {
+  margin-top: var(--space-xl);
+  padding-block: var(--space-lg);
+  border-top: var(--rule-hair) solid var(--color-ink);
+  color: var(--color-muted);
 }
 
-.update-banner-enter-from,
-.update-banner-leave-to {
-  opacity: 0;
-  transform: translateY(-6px);
+.article-state.is-error {
+  color: var(--color-error);
 }
 
-.article-layout {
+.article-update {
   display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-sm) var(--space-lg);
+  margin-top: var(--space-lg);
+  padding: var(--space-sm) var(--space-lg);
+  background: var(--color-ink);
+  color: var(--color-paper);
 }
 
-.article-stack {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
+.article-update-btn {
+  border-color: var(--color-paper);
+  color: var(--color-paper);
 }
 
-.article-kicker {
-  margin: 0;
-  font-size: 13px;
-  color: var(--accent);
-  font-weight: 500;
+.article-update-btn:hover:not(:disabled) {
+  background: var(--color-ink-2);
+}
+
+.article-dayline {
+  margin-top: var(--space-lg);
+  padding-block: var(--space-sm);
+  border-block: var(--rule-hair) solid var(--color-rule);
+  color: var(--color-ink-2);
+}
+
+.article-head {
+  margin-top: var(--space-lg);
+  padding-top: var(--space-lg);
+  border-top: var(--rule-bar) solid var(--color-ink);
 }
 
 .article-title {
-  margin: 10px 0 0;
-  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.4rem);
-  line-height: 1.18;
-  letter-spacing: -0.015em;
-  color: var(--ink);
+  min-width: 0;
+  max-width: 24ch;
+  overflow-wrap: break-word;
+  font-family: var(--font-display-2);
+  font-size: var(--text-display-s);
+  line-height: 1.06;
+  letter-spacing: 0;
 }
 
 .article-meta {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  margin-top: 16px;
-  font-size: 13px;
-  color: var(--ink-soft);
+  gap: var(--space-xs) var(--space-lg);
+  margin-top: var(--space-lg);
+  font-size: var(--text-sm);
+  color: var(--color-muted);
+}
+
+.article-kind {
+  font-weight: 600;
+  color: var(--color-ink);
+}
+
+.article-lead {
+  margin-top: var(--space-lg);
+  max-width: 62ch;
+  color: var(--color-ink-2);
 }
 
 .article-share {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: var(--space-xs);
+  margin-top: var(--space-lg);
 }
 
-.share-btn {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.share-btn:hover {
-  color: var(--ink);
-  border-color: rgba(15, 20, 30, 0.2);
-}
-
-.share-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
-.takeaways {
-  border-left: 3px solid var(--accent);
-  border-radius: 12px;
-  background: var(--accent-soft);
-  padding: 18px 22px;
-}
-
-.takeaways h2,
-.section-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.takeaways ul {
-  margin: 10px 0 0;
-  padding-left: 1.1em;
+/* Body on columns 1 to 7, the takeaways held beside it on 9 to 12. */
+.article-columns {
   display: grid;
-  gap: 6px;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--ink);
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+  column-gap: var(--gap-columns);
+  row-gap: var(--space-xl);
+  align-items: start;
+  margin-top: var(--space-2xl);
+  padding-top: var(--space-xl);
+  border-top: var(--rule-hair) solid var(--color-ink);
 }
 
-.perf-wrap {
-  margin-top: 14px;
-  overflow-x: auto;
+.article-body {
+  grid-column: 1 / span 7;
+  grid-row: 1;
+  min-width: 0;
+  font-size: var(--text-lg);
+  line-height: 1.65;
 }
 
-.perf {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13.5px;
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+.article-body p,
+.article-body ul {
+  max-width: 65ch;
+  margin-bottom: var(--space-md);
 }
 
-.perf th,
-.perf td {
-  padding: 8px 10px;
-  text-align: right;
-  border-bottom: 1px solid var(--line);
-}
-
-.perf th:first-child {
-  text-align: left;
-  font-weight: 500;
-  color: var(--ink);
-}
-
-.perf thead th {
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--ink-soft);
-}
-
-.perf .is-up {
-  color: var(--up);
-}
-
-.perf .is-down {
-  color: var(--down);
-}
-
-.sources {
-  margin: 12px 0 0;
-  padding-left: 1.3em;
-  display: grid;
-  gap: 6px;
-  font-size: 13.5px;
-}
-
-.sources a {
-  color: var(--ink);
-  font-weight: 500;
-}
-
-.sources-path {
-  margin-left: 6px;
-  color: var(--ink-soft);
-  overflow-wrap: anywhere;
-}
-
-.article-lead {
-  margin-top: 1rem;
-  font-size: 1.04rem;
-  line-height: 1.8;
-  color: var(--ink-soft);
-  max-width: 68ch;
-}
-
-.article-body-content {
-  max-width: 72ch;
-  color: var(--ink);
-  font-size: 1.04rem;
-  line-height: 1.9;
-}
-
-.article-body-content p {
-  margin: 0 0 1.1em;
-}
-
-.article-body-content p:last-child {
+.article-body p:last-child {
   margin-bottom: 0;
 }
 
-.article-body-content h2 {
-  margin: 1.6em 0 0.5em;
-  font-size: 1.2rem;
-  line-height: 1.35;
-  font-weight: 600;
+.article-body h2 {
+  text-wrap: balance;
+  margin-top: var(--space-xl);
+  margin-bottom: var(--space-sm);
+  font-size: var(--text-xl);
+  line-height: 1.15;
 }
 
-.article-body-content h2:first-child {
+.article-body h2:first-child {
   margin-top: 0;
 }
 
-.article-body-content ul {
-  margin: 0 0 1.1em;
+.article-body ul {
   padding-left: 1.2em;
-  list-style: disc;
 }
 
-.article-body-content li {
-  margin-bottom: 0.35em;
+.article-body li {
+  margin-bottom: var(--space-2xs);
 }
 
-@media (max-width: 640px) {
-  .article-kicker {
-  margin: 0;
-  font-size: 13px;
-  color: var(--accent);
-  font-weight: 500;
-}
-
-.article-title {
-  margin: 10px 0 0;
-  font-size: clamp(1.75rem, 1.2rem + 2vw, 2.4rem);
-  line-height: 1.18;
-  letter-spacing: -0.015em;
-  color: var(--ink);
-}
-
-.article-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px 16px;
-  margin-top: 16px;
-  font-size: 13px;
-  color: var(--ink-soft);
-}
-
-.article-share {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
-}
-
-.share-btn {
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: transparent;
-  padding: 5px 12px;
-  font: inherit;
-  font-size: 12.5px;
-  color: var(--ink-soft);
-  text-decoration: none;
-  cursor: pointer;
-}
-
-.share-btn:hover {
-  color: var(--ink);
-  border-color: rgba(15, 20, 30, 0.2);
-}
-
-.share-btn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.article-empty {
+  color: var(--color-muted);
 }
 
 .takeaways {
-  border-left: 3px solid var(--accent);
-  border-radius: 12px;
-  background: var(--accent-soft);
-  padding: 18px 22px;
+  grid-column: 9 / span 4;
+  grid-row: 1;
+  position: sticky;
+  top: calc(var(--bar-h) + var(--ticker-h) + var(--space-lg));
+  padding: var(--space-lg);
+  background: var(--color-paper-2);
 }
 
-.takeaways h2,
-.section-title {
-  margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--ink);
+.takeaways-title {
+  font-size: var(--text-lg);
+  line-height: 1;
+  text-transform: uppercase;
 }
 
 .takeaways ul {
-  margin: 10px 0 0;
-  padding-left: 1.1em;
   display: grid;
-  gap: 6px;
-  font-size: 15px;
-  line-height: 1.6;
-  color: var(--ink);
+  gap: var(--space-sm);
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.takeaways li {
+  padding-top: var(--space-sm);
+  border-top: var(--rule-hair) solid var(--color-rule);
+  line-height: 1.45;
+}
+
+.article-section {
+  margin-top: var(--space-3xl);
+}
+
+.article-section > h2 {
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .perf-wrap {
-  margin-top: 14px;
+  margin-top: var(--space-lg);
   overflow-x: auto;
 }
 
 .perf {
   width: 100%;
   border-collapse: collapse;
-  font-size: 13.5px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
 .perf th,
 .perf td {
-  padding: 8px 10px;
+  padding: var(--space-sm) var(--space-md);
   text-align: right;
-  border-bottom: 1px solid var(--line);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+
+.perf th:first-child,
+.perf td:first-child {
+  padding-left: 0;
+}
+
+.perf th:last-child,
+.perf td:last-child {
+  padding-right: 0;
 }
 
 .perf th:first-child {
   text-align: left;
-  font-weight: 500;
-  color: var(--ink);
+  font-weight: 600;
 }
 
 .perf thead th {
-  font-weight: 500;
-  font-size: 12px;
-  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  color: var(--color-muted);
+  border-bottom-color: var(--color-ink);
 }
 
 .perf .is-up {
-  color: var(--up);
+  color: var(--color-up);
 }
 
 .perf .is-down {
-  color: var(--down);
+  color: var(--color-down);
+}
+
+/* The chart draws in a fixed viewBox; past eight columns its axis labels grow too large. */
+.perf-chart {
+  max-width: 54rem;
+  margin-top: var(--space-xl);
+}
+
+.article-aftermath {
+  padding-top: var(--space-md);
+  border-top: var(--rule-hair) solid var(--color-ink);
+}
+
+/* Related briefs and sources side by side on a wide screen. */
+.article-refs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: var(--gap-columns);
+}
+
+.related,
+.sources {
+  display: grid;
+  margin: var(--space-md) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.related li,
+.sources li {
+  padding-block: var(--space-sm);
+  border-bottom: var(--rule-hair) solid var(--color-rule);
+}
+
+.related a {
+  font-family: var(--font-display-2);
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.related a:hover,
+.sources a:hover {
+  text-decoration: underline;
 }
 
 .sources {
-  margin: 12px 0 0;
-  padding-left: 1.3em;
-  display: grid;
-  gap: 6px;
-  font-size: 13.5px;
+  counter-reset: source;
+}
+
+.sources li {
+  counter-increment: source;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2xs) var(--space-xs);
+}
+
+.sources li::before {
+  content: counter(source) ".";
+  min-width: 2ch;
+  color: var(--color-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 .sources a {
-  color: var(--ink);
-  font-weight: 500;
+  font-weight: 600;
+  text-decoration: none;
 }
 
 .sources-path {
-  margin-left: 6px;
-  color: var(--ink-soft);
+  min-width: 0;
+  color: var(--color-muted);
   overflow-wrap: anywhere;
 }
 
-.article-lead {
-    font-size: 1rem;
-    line-height: 1.72;
+@media (max-width: 60rem) {
+  .article-body,
+  .takeaways {
+    grid-column: 1 / -1;
+    grid-row: auto;
   }
 
-  .article-body-content {
-    font-size: 1rem;
-    line-height: 1.8;
+  .takeaways {
+    position: static;
+  }
+
+  .article-refs {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
 </style>
