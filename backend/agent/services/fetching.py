@@ -546,6 +546,7 @@ class FetchingMixin:
             or entry.get("date")
             or entry.get("datetime")
             or entry.get("time_published")
+            or entry.get("seendate")
             or entry.get("updated")
             or entry.get("published")
         )

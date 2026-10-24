@@ -76,11 +76,18 @@ NEWS_RSS_SOURCES = [
         "enabled": True,
         "rate_limit_seconds": 120,
     },
+    {"name": "Fed - FEDS Notes", "base_url": "https://www.federalreserve.gov/feeds/feds_notes.xml", "enabled": True, "rate_limit_seconds": 300},
+    {"name": "BIS - Central Bank Speeches", "base_url": "https://www.bis.org/doclist/cbspeeches.rss", "enabled": True, "rate_limit_seconds": 120},
+    {"name": "Bank of Canada - Press Releases", "base_url": "https://www.bankofcanada.ca/content_type/press-releases/feed/", "enabled": True, "rate_limit_seconds": 120},
+    {"name": "RBNZ - News", "base_url": "https://www.rbnz.govt.nz/feeds/news", "enabled": True, "rate_limit_seconds": 120},
 ]
 
-# Free market-news feeds (no key). Checked reachable 2026-10-22; a feed that
+# Free market-news feeds (no key). Checked reachable 2026-10-22 (CNBC, WSJ 2026-10-24); a feed that
 # starts failing backs off on its own (see FetchingMixin._record_source_error).
 MARKET_RSS_SOURCES = [
+    {"name": "CNBC - Markets", "base_url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=20910258"},
+    {"name": "CNBC - Economy", "base_url": "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"},
+    {"name": "WSJ - Markets", "base_url": "https://feeds.a.dj.com/rss/RSSMarketsMain.xml"},
     {"name": "MarketWatch - Top Stories", "base_url": "https://feeds.marketwatch.com/marketwatch/topstories/"},
     {"name": "Investing.com - Stock Market News", "base_url": "https://www.investing.com/rss/news_25.rss"},
     {"name": "FT - Markets", "base_url": "https://www.ft.com/markets?format=rss"},
@@ -117,6 +124,16 @@ for _source in MARKET_RSS_SOURCES:
 
 
 NEWS_API_SOURCES = [
+    {
+        # GDELT DOC 2.0: free, no key, worldwide coverage; allows one request per 5 seconds.
+        "name": "GDELT - Markets & Central Banks",
+        "base_url": "https://api.gdeltproject.org/api/v2/doc/doc?mode=artlist&format=json&maxrecords=75&sort=datedesc&timespan=4h",
+        "source_type": NewsSource.SOURCE_API,
+        "enabled": True,
+        "query_param": "query",
+        "query": '("central bank" OR inflation OR "interest rates" OR "stock market" OR "oil prices" OR "gold price" OR forex) sourcelang:english',
+        "rate_limit_seconds": 900,
+    },
     {
         "name": "Finnhub - General Financial News",
         "base_url": "https://finnhub.io/api/v1/news",
@@ -218,6 +235,11 @@ ASSET_SERIES = [
     {"symbol": "DX-Y.NYB", "label": "US Dollar Index (DXY)", "timeframe": "1m"},
     {"symbol": "EURUSD=X", "label": "EUR/USD", "timeframe": "1m"},
     {"symbol": "^TNX", "label": "US 10Y Yield", "timeframe": "1m"},
+    {"symbol": "BZ=F", "label": "Brent Crude Oil", "timeframe": "1m"},
+    {"symbol": "HG=F", "label": "Copper", "timeframe": "1m"},
+    {"symbol": "^DJI", "label": "Dow Jones Industrial Average", "timeframe": "1m"},
+    {"symbol": "^VIX", "label": "VIX Volatility Index", "timeframe": "1m"},
+    {"symbol": "JPY=X", "label": "USD/JPY", "timeframe": "1m"},
     {"symbol": "BTC-USD", "label": "Bitcoin (BTCUSD)", "timeframe": "1m"},
     {"symbol": "ETH-USD", "label": "Ether (ETHUSD)", "timeframe": "1m"},
     {"symbol": "DTWEXBGS", "label": "Trade-Weighted USD Index (FRED)", "timeframe": "1m"},

@@ -40,6 +40,11 @@ YF_SYMBOLS = {
     "XAGUSD=X": "SI=F",
     "CL=F": "CL=F",
     "^TNX": "^TNX",
+    "BZ=F": "BZ=F",
+    "HG=F": "HG=F",
+    "^DJI": "^DJI",
+    "^VIX": "^VIX",
+    "JPY=X": "JPY=X",
 }
 # Crypto comes from an exchange via ccxt (live 1m bars); Yahoo serves it when that fails.
 CCXT_SYMBOLS = {"BTC-USD": "BTC/USDT", "ETH-USD": "ETH/USDT"}

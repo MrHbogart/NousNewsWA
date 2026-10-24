@@ -128,14 +128,16 @@ Key groups:
 
 ## Data sources
 
-- News: central-bank feeds plus free market RSS (MarketWatch, Investing.com,
-  FT, BBC, Economist, Guardian, Nasdaq, Seeking Alpha, ForexLive, FXEmpire,
-  OilPrice, CoinDesk, Cointelegraph, Google News topic searches); key-gated
-  APIs (Finnhub, Alpha Vantage, NewsAPI, GNews, Marketaux, FRED). Edit or add
-  sources in Django admin (`NewsSource`).
+- News: central-bank feeds (Fed, ECB, BoE, BoJ, SNB, Bank of Canada, RBNZ,
+  BIS speeches) plus free market RSS (CNBC, WSJ Markets, MarketWatch,
+  Investing.com, FT, BBC, Economist, Guardian, Nasdaq, Seeking Alpha,
+  ForexLive, FXEmpire, OilPrice, CoinDesk, Cointelegraph, Google News topic
+  searches); the free, keyless GDELT DOC API (one request per 5s, polled every
+  15 min); key-gated APIs (Finnhub, Alpha Vantage, NewsAPI, GNews, Marketaux,
+  FRED). Edit or add sources in Django admin (`NewsSource`).
 - Prices (1-minute bars): Yahoo Finance via `yfinance` for gold, silver, WTI,
-  S&P 500, Nasdaq, DXY, EUR/USD and the US 10Y yield; crypto (BTC, ETH) via
-  `ccxt`, with Yahoo as fallback. `PriceSource` rows add other feeds.
+  Brent, copper, S&P 500, Nasdaq, Dow, VIX, DXY, EUR/USD, USD/JPY and the US
+  10Y yield; crypto (BTC, ETH) via `ccxt`, with Yahoo as fallback. `PriceSource` rows add other feeds.
 - Use Django admin → Agent Configuration → "Test LLM connection" after
   setting a key.
 
