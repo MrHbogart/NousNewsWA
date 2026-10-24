@@ -24,13 +24,13 @@
       <div ref="sentinel" class="scroll-sentinel"></div>
 
       <!-- End of list indicator -->
-      <p v-if="!infiniteScroll.hasMore && totalCards > 0" class="feed-note feed-end">You’ve reached the beginning of our records</p>
+      <p v-if="!hasMore && totalCards > 0" class="feed-note feed-end">You’ve reached the beginning of our records</p>
 
       <!-- Empty state -->
-      <p v-if="totalCards === 0 && !infiniteScroll.isLoading" class="feed-note">No articles available yet. Check back soon.</p>
+      <p v-if="totalCards === 0 && !isLoading" class="feed-note">No articles available yet. Check back soon.</p>
 
       <!-- Loading indicator -->
-      <p v-if="infiniteScroll.isLoading" class="feed-note feed-loading" role="status">
+      <p v-if="isLoading" class="feed-note feed-loading" role="status">
         <span class="feed-spinner keep-motion" aria-hidden="true"></span>
         Loading more articles…
       </p>
@@ -57,9 +57,10 @@ const infiniteScroll = useInfiniteScroll(
   },
   { threshold: 500, pageSize, autoLoad: true }
 )
-// `ref="sentinel"` in the template only binds to a top-level ref of this name;
-// without this alias the composable's IntersectionObserver never attaches.
-const sentinel = infiniteScroll.sentinel
+// The template only unwraps top-level refs: `ref="sentinel"` binds only to a
+// top-level ref of this name (else the IntersectionObserver never attaches), and
+// `infiniteScroll.isLoading` would be the ref object itself, always truthy.
+const { sentinel, isLoading, hasMore } = infiniteScroll
 
 // Rendered on the server; live updates arrive over SSE afterwards.
 const { data: initial } = await useAsyncData(`home-${timeframe.value}`, async () => {
@@ -76,7 +77,8 @@ if (initial.value?.briefs?.length) infiniteScroll.seed(initial.value.briefs)
 const historicalCards = computed(() =>
   (infiniteScroll.items.value || []).filter((card) => card.id !== currentCard.value?.id)
 )
-const totalCards = computed(() => (currentCard.value ? 1 : 0) + historicalCards.value.length)
+// The current brief only shows on the unfiltered feed, so only count it there.
+const totalCards = computed(() => (currentCard.value && !timeframe.value ? 1 : 0) + historicalCards.value.length)
 
 // Prepend newly published briefs and refresh edited ones, without discarding
 // pages already scrolled into.

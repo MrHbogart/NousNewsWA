@@ -197,6 +197,24 @@ to a fresh `0001_initial` per app (data was disposable).
   the article page renders `## ` sections, key takeaways (`impacts`), a
   performance table and share links (`utils/market.js`).
 
+## Frontend redesign pass (2026-10-23)
+
+- Visual redesign (broadsheet: tokens, ink rules, three faces); features,
+  routes and data wiring unchanged. Tailwind, the unused Merriweather import,
+  ~600 lines of dead/duplicated `app.css` and `plugins/scroll-reset.client.js`
+  removed.
+- The footer rendered beside the feed (a global `display: flex` on the
+  scroll container), halving the feed on phones. The page now scrolls the
+  document instead of an inner `.app-main`.
+- The feed's loading, end-of-list and empty states never worked: the
+  template read `infiniteScroll.isLoading`/`.hasMore`, refs nested in a plain
+  object, which templates don't unwrap (always truthy). "Loading more
+  articles…" stayed forever and the empty state could not show. They are
+  now top-level aliases, like `sentinel`.
+- `totalCards` counted the current brief on filtered views that hide it, so
+  an empty Weekly/Monthly view said "reached the beginning" instead of the
+  empty state.
+
 ## Open — flagged, not changed
 
 - **No paid/maintained price provider yet.** yfinance and Binance (via ccxt)

@@ -95,10 +95,20 @@ updates over SSE via `composables/useEventStream.js` (`/stream/home/`,
 and emit `NewsArticle` JSON-LD. `server/routes/` serves `sitemap.xml`,
 `rss.xml` and `robots.txt`.
 
+Styling is plain CSS, no framework: `assets/css/tokens.css` (every colour,
+font, size, space and duration as a custom property), `assets/css/base.css`
+(element defaults), `assets/css/app.css` (chrome, the shared `.story` row,
+buttons, prose pages; its opening comment records the design decisions),
+and scoped `<style>` per component, all reading the tokens. Fonts (Six Caps,
+Bevan, Archivo Narrow) load from Google Fonts in `nuxt.config.js`. The
+document scrolls normally; the bar and the `MarketTicker` are sticky
+together in `layouts/default.vue`.
+
 `frontend/ARCHITECTURE.md`, `frontend/TECHNICAL_DEEP_DIVE.md`, and
 `frontend/README_REDESIGN.md` are pre-existing, point-in-time design
-write-ups for the card-scroll UI redesign — background/rationale for the
-current component structure, not living documents. Treat them like
+write-ups for the earlier card-scroll UI, superseded by the 2026-10-23
+broadsheet redesign (inner scroll container, glass cards and Tailwind are
+gone) — history, not living documents. Treat them like
 `reviews/` (below): read for context, don't edit them to reflect new
 changes.
 
