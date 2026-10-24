@@ -43,9 +43,9 @@ export default defineNuxtConfig({
       meta: [
         {
           name: 'description',
-          content: 'Market news every 4 hours: what happened and how prices reacted.',
+          content: 'Sharp market briefs every 4 hours: the news that moved prices, with live charts of the reaction.',
         },
-        { name: 'theme-color', content: '#e8dfca' },
+        { name: 'theme-color', content: '#ffffff' },
         { name: 'viewport', content: 'width=device-width, initial-scale=1, viewport-fit=cover' },
       ],
       link: [

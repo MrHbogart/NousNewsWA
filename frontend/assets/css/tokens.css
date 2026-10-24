@@ -9,17 +9,16 @@
   --color-error: oklch(52% 0.19 27); --color-success: oklch(50% 0.12 150);
   --container: 1440px; --gutter: 64px; --gap-columns: 32px; --section-gap-s: 120px; --section-gap: 144px; --section-gap-l: 176px;
   --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
-  --color-paper: oklch(92% 0.028 88); --color-paper-2: oklch(88.5% 0.032 88); --color-paper-3: oklch(85% 0.036 86);
-  --color-ink: oklch(18% 0.01 50); --color-ink-2: oklch(30% 0.012 50); --color-muted: oklch(43% 0.02 62);
-  --color-rule: oklch(75% 0.028 82); --color-card: oklch(95.5% 0.018 88);
-  --color-accent: oklch(53% 0.19 33); --color-accent-ink: oklch(95.5% 0.018 88); --color-focus: oklch(53% 0.19 33);
+  --color-paper: oklch(100% 0 0); --color-paper-2: oklch(96.5% 0.004 80); --color-paper-3: oklch(93% 0.006 80);
+  --color-ink: oklch(18% 0.01 50); --color-ink-2: oklch(30% 0.012 50); --color-muted: oklch(45% 0.012 60);
+  --color-rule: oklch(86% 0.008 80); --color-card: oklch(100% 0 0);
+  --color-accent: oklch(53% 0.19 33); --color-accent-ink: oklch(100% 0 0); --color-focus: oklch(53% 0.19 33);
   --font-display: "Six Caps", "Impact", sans-serif; --font-display-2: "Bevan", Georgia, serif;
   --font-body: "Archivo Narrow", "Arial Narrow", ui-sans-serif, sans-serif;
   --font-outlier: var(--font-body); --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
   --radius-card: 0; --radius-pill: 0; --rule-hair: 1px; --rule-bar: 5px; --rule-frame: 3px;
   --shadow-card: none;
   --tracking-display: 0.02em; --display-weight: 400;
-  --grain: 0.08;
   --color-up: oklch(46% 0.11 152); --color-down: oklch(48% 0.17 25);
   --measure-prose: 37rem; --measure-feed: 40rem; --control-h: 44px; --control-h-app: 40px; --bar-h: 88px; --ticker-h: 40px;
 }

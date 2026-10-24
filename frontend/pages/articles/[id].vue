@@ -1,8 +1,8 @@
 <template>
   <section class="article-page">
-    <NuxtLink to="/" class="text-link article-back">Back to brief</NuxtLink>
+    <NuxtLink to="/" class="text-link article-back">All briefs</NuxtLink>
 
-    <p v-if="pending" class="article-state">Loading report…</p>
+    <p v-if="pending" class="article-state">Pulling up the brief…</p>
 
     <p v-else-if="error" class="article-state is-error">
       This report could not be loaded. Verify the article ID and API base URL.
@@ -10,8 +10,8 @@
 
     <article v-else class="article">
       <div v-if="hasPendingArticleUpdate" class="article-update" role="status">
-        <p>A newer version of this article is available.</p>
-        <button type="button" class="btn article-update-btn" @click="applyPendingUpdate">Load update</button>
+        <p>Fresh update: this story has moved on since you opened it.</p>
+        <button type="button" class="btn article-update-btn" @click="applyPendingUpdate">Show the update</button>
       </div>
 
       <p v-if="displayedArticle?.day_article" class="article-dayline">
@@ -40,7 +40,7 @@
 
         <div class="article-columns">
           <section v-if="takeaways.length" class="takeaways" aria-labelledby="takeaways-title">
-            <h2 id="takeaways-title" class="takeaways-title">Key takeaways</h2>
+            <h2 id="takeaways-title" class="takeaways-title">The short version</h2>
             <ul>
               <li v-for="item in takeaways" :key="item">{{ item }}</li>
             </ul>
@@ -56,7 +56,7 @@
                 <p v-else>{{ block.text }}</p>
               </template>
             </template>
-            <p v-else class="article-empty">The full text of this brief isn’t available yet.</p>
+            <p v-else class="article-empty">The full write-up is still being drafted. The takeaways and charts are live now.</p>
           </div>
         </div>
 
@@ -91,7 +91,7 @@
 
         <div class="article-refs">
           <section v-if="relatedLinks.length" class="article-section" aria-labelledby="related-title">
-            <h2 id="related-title" class="rule-head">Also in this period</h2>
+            <h2 id="related-title" class="rule-head">Meanwhile, in the same window</h2>
             <ul class="related">
               <li v-for="item in relatedLinks" :key="item.uuid">
                 <NuxtLink :to="`/articles/${item.slug || item.uuid}`">
@@ -102,7 +102,7 @@
           </section>
 
           <section v-if="references.length" class="article-section" aria-labelledby="sources-title">
-            <h2 id="sources-title" class="rule-head">Sources</h2>
+            <h2 id="sources-title" class="rule-head">Where the story came from</h2>
             <ol class="sources">
               <li v-for="ref in references" :key="ref.url">
                 <a :href="ref.url" target="_blank" rel="noopener noreferrer nofollow">{{ ref.host }}</a>

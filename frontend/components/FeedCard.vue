@@ -14,7 +14,7 @@
     </h2>
 
     <p :id="`card-${uid}-summary`" ref="summaryEl" class="card-summary" :class="{ 'is-clamped': !expanded }">
-      {{ card.summary || (isCurrent ? 'Waiting for the first stories of this block.' : 'No summary yet.') }}
+      {{ card.summary || (isCurrent ? 'Scanning the wires for the first stories of this block…' : 'Summary on its way.') }}
     </p>
     <button
       v-if="overflows || expanded"
@@ -24,7 +24,7 @@
       :aria-controls="`card-${uid}-summary`"
       @click="expanded = !expanded"
     >
-      {{ expanded ? 'Show less' : 'Read more' }}
+      {{ expanded ? 'Show less' : 'Keep reading' }}
     </button>
 
     <footer class="card-actions">
@@ -39,10 +39,10 @@
         <svg class="card-icon" viewBox="0 0 16 16" aria-hidden="true">
           <path d="M2 13h12M4 10V7M8 10V3M12 10V5" />
         </svg>
-        {{ chartsOpen ? 'Hide charts' : `Charts (${series.length})` }}
+        {{ chartsOpen ? 'Hide charts' : `See the moves (${series.length})` }}
       </button>
       <NuxtLink v-if="link" :to="link" class="card-action card-read">
-        Read full article
+        Read the full story
         <svg class="card-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" /></svg>
       </NuxtLink>
     </footer>

@@ -1,8 +1,8 @@
 <template>
   <div class="front">
     <header class="front-head">
-      <h1 class="front-title">What moved the markets today</h1>
-      <p class="front-lede">A new brief every 4 hours, and how prices reacted.</p>
+      <h1 class="front-title">The market story, as it breaks</h1>
+      <p class="front-lede">Every 4 hours: the headlines that mattered and the price moves they caused, side by side.</p>
     </header>
 
     <!-- Newest first: the live 4-hour brief, then today's briefs, then one article per past day -->
@@ -19,10 +19,10 @@
 
       <p v-if="isLoading" class="feed-note" role="status">
         <span class="feed-spinner keep-motion" aria-hidden="true"></span>
-        Loading older articles…
+        Digging up earlier briefs…
       </p>
-      <p v-else-if="totalCards === 0" class="feed-note">No articles available yet. Check back soon.</p>
-      <p v-else-if="!hasMore" class="feed-note">You’ve reached the beginning of our records</p>
+      <p v-else-if="totalCards === 0" class="feed-note">The first brief is being written. Check back within the hour.</p>
+      <p v-else-if="!hasMore" class="feed-note">That’s the whole archive. You’re all caught up.</p>
     </div>
   </div>
 </template>
@@ -100,11 +100,11 @@ useEventStream('/stream/home/', {
 })
 
 useSeoMeta({
-  title: 'NousNews · What moved the markets today',
+  title: 'NousNews · The market story, as it breaks',
   description:
-    'Market news every 4 hours: what happened, why it matters, and how stocks, bonds, gold, oil and crypto reacted — with live price charts.',
-  ogTitle: 'NousNews · What moved the markets today',
-  ogDescription: 'Market news every 4 hours with the price reaction charted next to it.',
+    'Sharp market briefs every 4 hours: the news that moved stocks, bonds, gold, oil, FX and crypto, with live charts of the reaction.',
+  ogTitle: 'NousNews · The market story, as it breaks',
+  ogDescription: 'The news that moved markets, every 4 hours, with the price reaction charted right beside it.',
   ogType: 'website',
 })
 </script>

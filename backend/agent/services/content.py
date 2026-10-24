@@ -257,9 +257,10 @@ class ContentMixin:
         ranked = self._rank_records(records)
 
         title = self._ensure_informative_title("", ranked, timeframe, period_start)
+        sources = {item.get("source_name") for item in ranked if item.get("source_name")}
         intro = (
-            f"{len(ranked)} financially relevant developments were identified across tracked market sources, "
-            "with clear implications for cross-asset positioning."
+            f"{len(ranked)} market-moving stories crossed the wires in this window, from {len(sources) or 'several'} "
+            f"source{'' if len(sources) == 1 else 's'}. Here is what traders were watching."
         )
 
         detail_sentences = []
@@ -269,17 +270,17 @@ class ContentMixin:
                 continue
             source_name = item.get("source_name") or "newswire"
             detail_sentences.append(
-                f"{source_name} reported {headline}. {self._impact_sentence(item)}"
+                f"{headline.rstrip('.')} ({source_name}). {self._impact_sentence(item)}"
             )
 
         if not detail_sentences:
             detail_sentences.append(
-                "No lower-impact or off-topic items were included; this brief is restricted to market-moving records only."
+                "A quiet stretch: nothing in this window cleared the bar for market-moving news."
             )
 
         closing = (
-            "Taken together, these signals can influence rate expectations, risk appetite, "
-            "currency positioning, and sector-level equity rotation in the next trading sessions."
+            "The thread to follow: how these stories shift rate expectations, risk appetite and "
+            "currency flows over the next few sessions."
         )
 
         sections = [intro] + detail_sentences + [closing]
@@ -324,14 +325,14 @@ class ContentMixin:
         text = (record.get("title") or "") + " " + (record.get("summary") or "") + " " + (record.get("content") or "")
         low = text.lower()
         if any(token in low for token in ["interest rate", "fed", "ecb", "inflation", "cpi", "ppi", "gdp"]):
-            return "This type of catalyst typically reprices rates markets and policy-sensitive FX pairs."
+            return "Watch rates and the dollar: this is the kind of news that moves policy bets."
         if any(token in low for token in ["earnings", "guidance", "revenue", "profit", "m&a", "merger", "acquisition"]):
-            return "This development is likely to affect equity valuation multiples and sector positioning."
+            return "Equity investors will be re-running their valuations on this one."
         if any(token in low for token in ["oil", "gas", "commodity", "energy", "supply chain", "tariff", "sanction"]):
-            return "Commodity-linked inflation expectations and regional risk premia could adjust quickly."
+            return "Energy and commodity prices, and the inflation outlook with them, can swing fast on news like this."
         if any(token in low for token in ["bond", "yield", "treasury", "credit", "default", "rating"]):
-            return "Credit spreads and sovereign yield curves may react as investors reprice risk."
-        return "Cross-asset positioning may adjust as participants incorporate the new information into risk scenarios."
+            return "Bond markets are in the firing line: yields and credit spreads may reprice."
+        return "One for the risk radar as markets digest it."
 
     def _derive_impacts(self, records: list[dict]) -> list[str]:
         low = " ".join(
@@ -343,15 +344,15 @@ class ContentMixin:
 
         impacts = []
         if any(token in low for token in ["interest rate", "fed", "ecb", "inflation", "cpi", "ppi", "gdp"]):
-            impacts.append("Rates and FX: policy expectations can reprice sovereign yields and major currency pairs.")
+            impacts.append("Rates and FX: shifting policy bets can move bond yields and the major currency pairs.")
         if any(token in low for token in ["earnings", "guidance", "revenue", "profit", "m&a", "merger", "acquisition"]):
-            impacts.append("Equities: sector rotation risk rises as earnings and corporate actions reshape valuation assumptions.")
+            impacts.append("Equities: earnings and deals are reshaping valuations, so expect money to rotate between sectors.")
         if any(token in low for token in ["oil", "gas", "commodity", "energy", "supply chain", "tariff", "sanction"]):
-            impacts.append("Commodities: supply and geopolitics can amplify volatility in energy and input-sensitive sectors.")
+            impacts.append("Commodities: supply worries and geopolitics can make energy and raw materials jumpy.")
         if any(token in low for token in ["bond", "yield", "treasury", "credit", "default", "rating"]):
-            impacts.append("Credit: spread widening risk can pressure leveraged balance sheets and higher-beta assets.")
+            impacts.append("Credit: wider spreads would squeeze heavily indebted companies and riskier assets first.")
         if not impacts:
-            impacts.append("Risk sentiment: cross-asset positioning may shift as new macro information is priced in.")
+            impacts.append("Risk sentiment: markets are still pricing in the new information, so moves may not be done.")
         return impacts[:6]
 
     def _build_context_from_records(

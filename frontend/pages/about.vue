@@ -2,21 +2,22 @@
   <article class="prose-page">
     <h1>About NousNews</h1>
     <p>
-      NousNews gives you a quick read on what happened in the financial markets and how prices reacted. Every 4 hours
-      we publish a short brief on the news that matters to markets, with the price charts of major assets for
-      the same period beside it. Once a day is over, its briefs are combined into one article for that day.
+      Markets move on news, and most coverage only tells you half of it. NousNews puts the story and the price
+      reaction on the same page. Every 4 hours we publish a sharp brief on the headlines that mattered, with charts
+      of stocks, bonds, gold, oil, currencies and crypto over the same window. When the day closes, its briefs are
+      folded into one article you can read in a few minutes.
     </p>
 
     <h2>How the briefs are made</h2>
     <p>
-      An automated pipeline reads public news feeds from established financial and economic publishers and keeps
-      only stories likely to move markets: central banks, inflation and jobs data, earnings, commodities, credit
-      and geopolitics. An AI language model then writes the brief from those stories. Every brief links to the
+      An automated pipeline reads public feeds from central banks, financial publishers and global news monitors,
+      and throws out the noise. What stays is what moves markets: central banks, inflation and jobs data,
+      earnings, commodities, credit and geopolitics. An AI language model then writes the brief from those stories. Every brief links to the
       original sources so you can check them.
     </p>
     <p>
-      For the most important briefs, we publish a follow-up a little later that compares what the brief described
-      with how prices actually moved afterwards.
+      For the biggest stories we come back later with a follow-up that checks the call: what the brief said, and
+      how prices actually moved afterwards.
     </p>
 
     <h2>What NousNews is not</h2>
