@@ -1,0 +1,32 @@
+[
+ {
+  "mode": "redesign",
+  "depth": "full",
+  "scope": "site",
+  "shape": "Index-First",
+  "theme": "broadside",
+  "axes": "light/display-condensed/warm",
+  "hero": "Index",
+  "nav": "masthead",
+  "footer": "colophon block",
+  "imagery": "none",
+  "photos": [],
+  "entry": "none",
+  "fingerprint": "index-first/index/masthead/colophon/rows/still",
+  "sections": [
+   "fitted headline",
+   "lead brief with chart",
+   "index rows",
+   "fitted datelines",
+   "colophon"
+  ],
+  "signature": "the live 4-hour brief as the front-page lead with its candlestick chart open",
+  "waived": [
+   "44c",
+   "79",
+   "49b"
+  ],
+  "prompt": "market news briefs every four hours with live price charts",
+  "date": "2026-10-23"
+ }
+]
