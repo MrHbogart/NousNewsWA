@@ -2,38 +2,27 @@
   <div class="front">
     <header class="front-head">
       <h1 class="front-title">What moved the markets today</h1>
-      <p class="lead front-lede">
-        A new brief every 4 hours on what happened and how prices reacted. Each past day is summed up in one article.
-      </p>
+      <p class="front-lede">A new brief every 4 hours, and how prices reacted.</p>
     </header>
 
-    <!-- Current 4-hour block (always at top) -->
-    <IntradayCard v-if="currentCard && !timeframe" :card="currentCard" :is-current="true" />
-
-    <!-- Historical cards, newest first (today's 4-hour briefs, then one article per past day) -->
+    <!-- Newest first: the live 4-hour brief, then today's briefs, then one article per past day -->
     <div class="feed">
-      <template v-for="card in historicalCards" :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`">
-        <DailyCard
-          v-if="card.is_daily_summary"
-          :card="card"
-        />
-        <IntradayCard v-else :card="card" :is-current="false" />
-      </template>
+      <FeedCard v-if="currentCard && !timeframe" :card="currentCard" is-current />
+      <FeedCard
+        v-for="card in historicalCards"
+        :key="`${card.is_daily_summary ? 'daily' : 'intraday'}-${card.id}`"
+        :card="card"
+      />
 
       <!-- Load more sentinel -->
       <div ref="sentinel" class="scroll-sentinel"></div>
 
-      <!-- End of list indicator -->
-      <p v-if="!hasMore && totalCards > 0" class="feed-note feed-end">You’ve reached the beginning of our records</p>
-
-      <!-- Empty state -->
-      <p v-if="totalCards === 0 && !isLoading" class="feed-note">No articles available yet. Check back soon.</p>
-
-      <!-- Loading indicator -->
-      <p v-if="isLoading" class="feed-note feed-loading" role="status">
+      <p v-if="isLoading" class="feed-note" role="status">
         <span class="feed-spinner keep-motion" aria-hidden="true"></span>
-        Loading more articles…
+        Loading older articles…
       </p>
+      <p v-else-if="totalCards === 0" class="feed-note">No articles available yet. Check back soon.</p>
+      <p v-else-if="!hasMore" class="feed-note">You’ve reached the beginning of our records</p>
     </div>
   </div>
 </template>
@@ -121,48 +110,50 @@ useSeoMeta({
 </script>
 
 <style scoped>
-.front-head {
-  container-type: inline-size;
-  padding-block: var(--space-lg) var(--space-md);
+/* One centered column, like a timeline. */
+.front {
+  max-width: var(--measure-feed);
+  margin-inline: auto;
+  padding-block: var(--space-xl) var(--space-2xl);
 }
 
-/* Fitted to the measure: one line of Six Caps across the twelve columns. */
+.front-head {
+  margin-bottom: var(--space-lg);
+  text-align: center;
+}
+
 .front-title {
   max-width: none;
-  font-size: 14.6cqi;
-  line-height: 0.88;
+  font-size: var(--text-display);
+  line-height: 0.95;
   text-transform: uppercase;
-  white-space: nowrap;
 }
 
 .front-lede {
-  margin-top: var(--space-md);
-  max-width: 60ch;
-  color: var(--color-ink-2);
+  margin-top: var(--space-xs);
+  color: var(--color-muted);
 }
 
 .feed {
   display: flex;
   flex-direction: column;
+  gap: var(--space-md);
 }
 
 .scroll-sentinel {
-  height: 2px;
+  height: 1px;
+  margin-top: calc(-1 * var(--space-md));
   visibility: hidden;
 }
 
 .feed-note {
   display: flex;
+  justify-content: center;
   align-items: center;
   gap: var(--space-sm);
   padding-block: var(--space-xl);
-  border-top: var(--rule-hair) solid var(--color-rule);
+  font-size: var(--text-sm);
   color: var(--color-muted);
-}
-
-.feed-end {
-  margin-top: var(--space-xl);
-  border-top: var(--rule-bar) solid var(--color-ink);
 }
 
 .feed-spinner {

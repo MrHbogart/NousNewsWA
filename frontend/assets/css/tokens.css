@@ -11,7 +11,7 @@
   --z-base: 1; --z-raised: 10; --z-dropdown: 100; --z-sticky: 200; --z-sticky-nav: 300; --z-modal: 400; --z-toast: 500; --z-tooltip: 600;
   --color-paper: oklch(92% 0.028 88); --color-paper-2: oklch(88.5% 0.032 88); --color-paper-3: oklch(85% 0.036 86);
   --color-ink: oklch(18% 0.01 50); --color-ink-2: oklch(30% 0.012 50); --color-muted: oklch(43% 0.02 62);
-  --color-rule: oklch(75% 0.028 82);
+  --color-rule: oklch(75% 0.028 82); --color-card: oklch(95.5% 0.018 88);
   --color-accent: oklch(53% 0.19 33); --color-accent-ink: oklch(95.5% 0.018 88); --color-focus: oklch(53% 0.19 33);
   --font-display: "Six Caps", "Impact", sans-serif; --font-display-2: "Bevan", Georgia, serif;
   --font-body: "Archivo Narrow", "Arial Narrow", ui-sans-serif, sans-serif;
@@ -21,5 +21,5 @@
   --tracking-display: 0.02em; --display-weight: 400;
   --grain: 0.08;
   --color-up: oklch(46% 0.11 152); --color-down: oklch(48% 0.17 25);
-  --measure-prose: 37rem; --control-h: 44px; --control-h-app: 40px; --bar-h: 56px; --ticker-h: 40px;
+  --measure-prose: 37rem; --measure-feed: 40rem; --control-h: 44px; --control-h-app: 40px; --bar-h: 88px; --ticker-h: 40px;
 }

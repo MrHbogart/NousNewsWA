@@ -18,7 +18,8 @@
       <slot />
     </main>
 
-    <footer class="site-footer">
+    <!-- The feed scrolls without end, so the front page has no footer to chase. -->
+    <footer v-if="route.path !== '/'" class="site-footer">
       <div class="container">
         <NuxtLink to="/" class="wordmark">NousNews</NuxtLink>
         <div>

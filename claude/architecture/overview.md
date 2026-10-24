@@ -97,12 +97,14 @@ and emit `NewsArticle` JSON-LD. `server/routes/` serves `sitemap.xml`,
 
 Styling is plain CSS, no framework: `assets/css/tokens.css` (every colour,
 font, size, space and duration as a custom property), `assets/css/base.css`
-(element defaults), `assets/css/app.css` (chrome, the shared `.story` row,
-buttons, prose pages; its opening comment records the design decisions),
+(element defaults), `assets/css/app.css` (chrome, buttons, prose pages; its opening comment records the design decisions),
 and scoped `<style>` per component, all reading the tokens. Fonts (Six Caps,
 Bevan, Archivo Narrow) load from Google Fonts in `nuxt.config.js`. The
 document scrolls normally; the bar and the `MarketTicker` are sticky
-together in `layouts/default.vue`.
+together in `layouts/default.vue`. The front page is one centered column
+of `components/FeedCard.vue` boxes (read-more, collapsible `PriceChart`,
+link to the article), loaded by `composables/useInfiniteScroll.js`; it has
+no footer, which only renders on the other pages.
 
 `frontend/ARCHITECTURE.md`, `frontend/TECHNICAL_DEEP_DIVE.md`, and
 `frontend/README_REDESIGN.md` are pre-existing, point-in-time design
